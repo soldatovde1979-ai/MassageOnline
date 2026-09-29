@@ -1,0 +1,387 @@
+<script>
+/* admin_js — VERSION = "1.1" (этап 15.1: запись мастером, перенос, отметки, лист действий; дата без сдвига UTC) */
+var TK = 'mb_admin_token_v1';
+var A = { token: null, mode: 'day', date: null, data: null };
+
+function api(action, payload, rid) {
+  return new Promise(function (res, rej) {
+    google.script.run
+      .withSuccessHandler(function (json) {
+        var r = JSON.parse(json);
+        r.ok ? res(r.data) : rej(r);
+      })
+      .withFailureHandler(function (e) { rej({ error: { code: 'INTERNAL', message: e.message } }); })
+      .apiCall(JSON.stringify({ action: action, request_id: rid || null, auth: { token: A.token }, payload: payload || {} }));
+  });
+}
+function el(id) { return document.getElementById(id); }
+/* Локальная дата. toISOString() даёт UTC: с 00:00 до 03:00 по Москве админка показывала вчерашний день. */
+function iso(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+function uid() { try { return crypto.randomUUID(); } catch (e) { return 'r' + Date.now() + Math.random().toString(16).slice(2); } }
+function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function durLabel(n) { var h = Math.floor(n / 2), m = n % 2 ? '30' : ''; return n === 1 ? '30 мин' : h + (m ? ',5' : '') + ' ч'; }
+function hm(s) { return String(s).slice(11, 16); }
+function say(t, k) { var m = el('msg'); m.textContent = t; m.className = 'msg ' + (k || 'err'); m.classList.remove('hide'); if (k === 'ok') setTimeout(function () { m.classList.add('hide'); }, 3500); }
+function fail(r) {
+  var c = r.error && r.error.code;
+  if (c === 'UNAUTHORIZED' || c === 'TOKEN_EXPIRED') { logout(); return; }
+  say((r.error && r.error.message) || 'Ошибка');
+}
+function tok(v) { try { v === null ? localStorage.removeItem(TK) : localStorage.setItem(TK, v); } catch (e) { } }
+function logout() { A.token = null; tok(null); el('app').classList.add('hide'); el('login').classList.remove('hide'); }
+
+function login() {
+  api('admin.login', { pin: el('pin').value }).then(function (d) {
+    A.token = d.token; tok(d.token);
+    el('login').classList.add('hide'); el('app').classList.remove('hide');
+    A.date = new Date(); load();
+  }).catch(function (r) { el('loginMsg').textContent = (r.error && r.error.message) || 'Ошибка'; el('loginMsg').classList.remove('hide'); });
+}
+
+function load() {
+  var from = new Date(A.date), to = new Date(A.date);
+  if (A.mode === 'week') { from.setDate(from.getDate() - ((from.getDay() + 6) % 7)); to = new Date(from.getTime() + 6 * 86400000); }
+  el('board').innerHTML = '<div class="spin">Загружаю…</div>';
+  api('admin.agenda', { date_from: iso(from), date_to: iso(to) }).then(function (d) {
+    A.data = d; A.from = from; A.to = to;
+    renderHead(); A.mode === 'day' ? renderDay() : renderWeek();
+  }).catch(fail);
+}
+
+function renderHead() {
+  var M = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  var W = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
+  var d = A.date;
+  el('title').textContent = A.mode === 'day'
+    ? W[d.getDay()] + ', ' + d.getDate() + ' ' + M[d.getMonth()]
+    : A.from.getDate() + ' – ' + A.to.getDate() + ' ' + M[A.to.getMonth()];
+  el('sync').textContent = A.data.last_sync_at ? 'синхронизация ' + hm(A.data.last_sync_at) : 'синхронизации ещё не было';
+}
+
+function bounds(dateStr) {
+  var w = A.data.work_windows.filter(function (x) { return x.date === dateStr; });
+  if (!w.length) return { s: 9, e: 21 };
+  var s = 24, e = 0;
+  w.forEach(function (x) { s = Math.min(s, parseInt(x.start, 10)); e = Math.max(e, Math.ceil(parseInt(x.end.slice(0, 2), 10) + (x.end.slice(3) === '30' ? 0.5 : 0))); });
+  return { s: Math.max(0, s - 1), e: Math.min(24, e + 1) };
+}
+
+function renderDay() {
+  var ds = iso(A.date);
+  var b = bounds(ds);
+  var rows = (b.e - b.s) * 2;
+  var times = '', lines = '';
+  for (var i = 0; i < rows; i++) {
+    var h = b.s + Math.floor(i / 2), m = i % 2 ? '30' : '00';
+    times += '<div>' + (i % 2 ? '' : (('0' + h).slice(-2) + ':00')) + '</div>';
+    var work = A.data.work_windows.some(function (w) {
+      return w.date === ds && (('0' + h).slice(-2) + ':' + m) >= w.start && (('0' + h).slice(-2) + ':' + m) < w.end;
+    });
+    lines += '<div class="gline' + (work ? '' : ' off') + '" data-t="' + ('0' + h).slice(-2) + ':' + m + '"></div>';
+  }
+  var evs = A.data.items.filter(function (it) { return it.start_at.slice(0, 10) === ds || it.end_at.slice(0, 10) === ds; });
+  var html = evs.map(function (it) {
+    /* Позиция — по времени мастера из строки ISO, а не по часовому поясу телефона. */
+    var sH = it.start_at.slice(0, 10) < ds ? 0 : hNum(it.start_at);
+    var eH = it.end_at.slice(0, 10) > ds ? 24 : hNum(it.end_at);
+    var top = (sH - b.s) * 72;
+    var hgt = Math.max(28, (eH - sH) * 72 - 3);
+    if (top < 0) { hgt += top; top = 0; }
+    var sync = it.calendar_sync_status && it.calendar_sync_status !== 'synced'
+      ? (it.calendar_sync_status === 'failed' ? ' &#9888;' : ' &#8987;') : '';
+    var st = it.status && it.status !== 'confirmed' ? ' st-' + it.status : '';
+    return '<div class="ev ' + it.kind + st + '" style="top:' + top + 'px;height:' + hgt + 'px" data-k="' + it.kind + '" data-id="' + esc(it.id) + '">' +
+      '<div class="t">' + hm(it.start_at) + '–' + hm(it.end_at) + ' ' + esc(it.kind === 'booking' ? (it.name || it.title) : it.title) + sync +
+      (it.status === 'no_show' ? ' · не пришла' : it.status === 'completed' ? ' · ✓' : '') + '</div>' +
+      (it.comment ? '<div>' + esc(it.comment) + '</div>' : '') + '</div>';
+  }).join('');
+  el('board').innerHTML = '<div class="gantt"><div class="gtime">' + times + '</div>' +
+    '<div class="gcol"><div class="gwrap">' + lines + html + '</div></div></div>' + legend();
+  bindEvents();
+  Array.prototype.forEach.call(document.querySelectorAll('.gline'), function (n) {
+    n.onclick = function () { openForm({ date: ds, time: n.dataset.t }); };
+  });
+}
+
+function renderWeek() {
+  var W = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  var out = '';
+  for (var i = 0; i < 7; i++) {
+    var d = new Date(A.from.getTime() + i * 86400000), ds = iso(d);
+    var evs = A.data.items.filter(function (it) { return it.start_at.slice(0, 10) === ds; });
+    out += '<div class="wd"><h3>' + W[i] + ' ' + d.getDate() + '</h3>' +
+      (evs.length ? evs.map(function (it) {
+        var st = it.status && it.status !== 'confirmed' ? ' st-' + it.status : '';
+        return '<div class="ev ' + it.kind + st + '" style="position:static;margin:3px 0" data-k="' + it.kind + '" data-id="' + esc(it.id) + '">' +
+          '<div class="t">' + hm(it.start_at) + '–' + hm(it.end_at) + ' ' + esc(it.kind === 'booking' ? (it.name || it.title) : it.title) + '</div></div>';
+      }).join('') : '<div class="tiny">свободно</div>') + '</div>';
+  }
+  el('board').innerHTML = '<div class="week">' + out + '</div>' + legend();
+  bindEvents();
+}
+
+function legend() {
+  return '<div class="legend">' +
+    '<div><span class="sw" style="background:#f0997b"></span>запись</div>' +
+    '<div><span class="sw" style="background:#b4b2a9"></span>блокировка</div>' +
+    '<div><span class="sw" style="background:#85b7eb"></span>событие календаря</div>' +
+    '<div>нажмите на свободное время, чтобы записать клиента</div>' +
+    '<div>&#8987; ждёт публикации &nbsp; &#9888; ошибка синхронизации</div></div>';
+}
+
+function bindEvents() {
+  Array.prototype.forEach.call(document.querySelectorAll('.ev'), function (n) {
+    n.onclick = function () {
+      var k = n.dataset.k, id = n.dataset.id;
+      if (k === 'external') { say('Это событие из Google Календаря — правьте его там', 'warn'); return; }
+      if (k === 'block') {
+        if (confirm('Удалить блокировку?')) api('admin.blockDelete', { block_id: id }).then(function () { say('Удалено', 'ok'); load(); }).catch(fail);
+        return;
+      }
+      var it = A.data.items.filter(function (x) { return x.id === id; })[0];
+      if (it) openBookingSheet(it);
+    };
+  });
+}
+
+function quickBlock(kind) {
+  var d = iso(A.date), s, e;
+  if (kind === 'lunch') { s = d + 'T13:00:00'; e = d + 'T14:00:00'; }
+  else if (kind === 'allday') { s = d + 'T00:00:00'; e = iso(new Date(A.date.getTime() + 86400000)) + 'T00:00:00'; }
+  else {
+    var now = new Date();
+    var h = (iso(now) === d) ? now.getHours() + 1 : 10;
+    s = d + 'T' + ('0' + h).slice(-2) + ':00:00'; e = d + 'T23:30:00';
+  }
+  sendBlock(s, e, kind === 'lunch' ? 'Обед' : '', false);
+}
+
+function sendBlock(s, e, reason, force) {
+  var off = tzOffset(s.slice(0, 10));
+  api('admin.blockCreate', { start_at: s + off, end_at: e + off, reason: reason, push_to_calendar: el('push').checked, force: force })
+    .then(function () { say('Время заблокировано', 'ok'); load(); })
+    .catch(function (r) {
+      if (r.error && r.error.code === 'CONFLICT') {
+        if (confirm('Интервал пересекается с ' + r.conflicts.length + ' записью(ями). Всё равно заблокировать?')) sendBlock(s, e, reason, true);
+        return;
+      }
+      fail(r);
+    });
+}
+
+/* Офсет часового пояса МАСТЕРА (A.data.timezone) на дату, а не телефона: иначе в поездке запись съедет на разницу поясов. */
+function tzOffset(dateStr) {
+  var tz = A.data && A.data.timezone;
+  if (tz) {
+    try {
+      var at = new Date((dateStr || iso(A.date || new Date())) + 'T12:00:00Z');
+      var p = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' }).formatToParts(at)
+        .filter(function (x) { return x.type === 'timeZoneName'; })[0];
+      var mm = p && /GMT([+-]\d{2}):?(\d{2})?/.exec(p.value);
+      if (mm) return mm[1] + ':' + (mm[2] || '00');
+      if (p && p.value === 'GMT') return '+00:00';
+    } catch (e) { }
+  }
+  var m = -new Date().getTimezoneOffset();
+  return (m >= 0 ? '+' : '-') + ('0' + Math.floor(Math.abs(m) / 60)).slice(-2) + ':' + ('0' + (Math.abs(m) % 60)).slice(-2);
+}
+function hNum(isoStr) { return parseInt(isoStr.slice(11, 13), 10) + parseInt(isoStr.slice(14, 16), 10) / 60; }
+
+function openSchedule() {
+  api('admin.scheduleGet').then(function (d) {
+    var W = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+    var rows = '';
+    for (var wd = 1; wd <= 7; wd++) {
+      var r = d.schedule.filter(function (x) { return x.weekday === wd; })[0] ||
+        { is_working: false, start_time: '10:00', end_time: '20:00' };
+      rows += '<tr><td>' + W[wd - 1] + '</td>' +
+        '<td><input type="checkbox" data-wd="' + wd + '" class="sw-on"' + (r.is_working ? ' checked' : '') + '></td>' +
+        '<td><input type="time" step="1800" class="sw-s" data-wd="' + wd + '" value="' + r.start_time + '"></td>' +
+        '<td><input type="time" step="1800" class="sw-e" data-wd="' + wd + '" value="' + r.end_time + '"></td></tr>';
+    }
+    el('schedBody').innerHTML = rows;
+    el('schedBox').classList.remove('hide');
+    el('board').classList.add('hide');
+  }).catch(fail);
+}
+
+function saveSchedule() {
+  var rows = [];
+  for (var wd = 1; wd <= 7; wd++) {
+    rows.push({
+      weekday: wd,
+      is_working: document.querySelector('.sw-on[data-wd="' + wd + '"]').checked,
+      start_time: document.querySelector('.sw-s[data-wd="' + wd + '"]').value.slice(0, 5),
+      end_time: document.querySelector('.sw-e[data-wd="' + wd + '"]').value.slice(0, 5),
+      note: ''
+    });
+  }
+  api('admin.scheduleSet', { rows: rows })
+    .then(function () { say('График сохранён', 'ok'); closeSchedule(); load(); })
+    .catch(fail);
+}
+function closeSchedule() { el('schedBox').classList.add('hide'); el('board').classList.remove('hide'); }
+
+/* ===== Лист действий и форма записи (этап 15.1) ===== */
+function sheet(html) { el('sheetBody').innerHTML = html; el('sheet').classList.remove('hide'); }
+function closeSheet() { el('sheet').classList.add('hide'); el('sheetBody').innerHTML = ''; }
+
+function openBookingSheet(it) {
+  var digits = String(it.phone || '').replace(/\D/g, '');
+  var started = new Date(it.start_at) <= new Date();
+  var h = '<h2 style="margin:0 0 4px">' + esc(it.name || it.title) + '</h2>' +
+    '<div class="tiny">' + hm(it.start_at) + '–' + hm(it.end_at) + ' · ' + durLabel(it.slots || 2) +
+    (it.source === 'admin' ? ' · записала сама' : '') + '</div>' +
+    (it.comment ? '<div class="note">' + esc(it.comment) + '</div>' : '') +
+    (digits ? '<div class="acts">' +
+      '<a class="btn ghost sm" href="tel:+' + digits + '">Позвонить</a>' +
+      '<a class="btn ghost sm" target="_blank" href="https://t.me/+' + digits + '">Telegram</a>' +
+      '<a class="btn ghost sm" target="_blank" href="https://wa.me/' + digits + '">WhatsApp</a></div>' : '') +
+    '<div class="acts">' +
+    (it.status === 'confirmed' ? '<button class="btn sm" id="aMove">Перенести</button>' : '') +
+    (started && it.status !== 'completed' ? '<button class="btn ghost sm" id="aDone">Пришла</button>' : '') +
+    (started && it.status !== 'no_show' ? '<button class="btn ghost sm" id="aNo">Не пришла</button>' : '') +
+    (started && it.status !== 'confirmed' ? '<button class="btn ghost sm" id="aUndo">Снять отметку</button>' : '') +
+    (it.status === 'confirmed' ? '<button class="btn danger sm" id="aCancel">Отменить</button>' : '') +
+    '</div><button class="btn ghost" id="aClose">Закрыть</button>';
+  sheet(h);
+  el('aClose').onclick = closeSheet;
+  if (el('aMove')) el('aMove').onclick = function () { openForm({ move: it }); };
+  if (el('aDone')) el('aDone').onclick = function () { mark(it.id, 'completed'); };
+  if (el('aNo')) el('aNo').onclick = function () { mark(it.id, 'no_show'); };
+  if (el('aUndo')) el('aUndo').onclick = function () { mark(it.id, 'confirmed'); };
+  if (el('aCancel')) el('aCancel').onclick = function () {
+    if (!confirm('Отменить запись ' + (it.name || '') + ' ' + hm(it.start_at) + '?')) return;
+    api('admin.bookingCancel', { booking_id: it.id }).then(function () { closeSheet(); say('Запись отменена', 'ok'); load(); }).catch(fail);
+  };
+}
+
+function mark(id, status) {
+  api('admin.bookingMark', { booking_id: id, status: status }).then(function () {
+    closeSheet(); say(status === 'completed' ? 'Отмечено: пришла' : status === 'no_show' ? 'Отмечено: не пришла' : 'Отметка снята', 'ok'); load();
+  }).catch(fail);
+}
+
+/* opts: {date, time} — новая запись; {move: item} — перенос */
+function openForm(opts) {
+  var mv = opts.move;
+  var F = A.form = { rid: uid(), move: mv || null, client: null, slots: mv ? (mv.slots || 2) : 2 };
+  var date = mv ? mv.start_at.slice(0, 10) : (opts.date || iso(A.date));
+  var time = mv ? hm(mv.start_at) : (opts.time || '12:00');
+  var chips = '';
+  for (var n = 1; n <= 8; n++) chips += '<span class="chip' + (n === F.slots ? ' sel' : '') + '" data-n="' + n + '">' + durLabel(n) + '</span>';
+  sheet('<h2 style="margin:0 0 10px">' + (mv ? 'Перенести: ' + esc(mv.name || '') : 'Новая запись') + '</h2>' +
+    (mv ? '' :
+      '<label class="lbl">Клиент</label>' +
+      '<div class="sugwrap"><input type="text" id="fName" placeholder="Имя или телефон" autocomplete="off">' +
+      '<div id="fSug" class="sug hide"></div></div>' +
+      '<div id="fPicked" class="picked hide"></div>' +
+      '<input type="tel" id="fPhone" inputmode="tel" placeholder="Телефон нового клиента" style="margin-top:8px">') +
+    '<div class="row" style="gap:8px;margin-top:10px">' +
+    '<div style="flex:1"><label class="lbl">Дата</label><input type="date" id="fDate" value="' + date + '"></div>' +
+    '<div style="width:120px"><label class="lbl">Начало</label><input type="time" step="1800" id="fTime" value="' + time + '"></div></div>' +
+    '<label class="lbl" style="margin-top:10px">Длительность</label><div class="chips" id="fDur">' + chips + '</div>' +
+    (mv ? '' : '<label class="lbl" style="margin-top:10px">Комментарий</label><input type="text" id="fComment" placeholder="Необязательно">') +
+    '<div class="msg err hide" id="fMsg" style="margin-top:10px"></div>' +
+    '<button class="btn" id="fSave" style="margin-top:12px">' + (mv ? 'Перенести' : 'Записать') + '</button>' +
+    '<button class="btn ghost" id="fClose" style="margin-top:8px">Отмена</button>');
+  el('fClose').onclick = closeSheet;
+  Array.prototype.forEach.call(el('fDur').children, function (c) {
+    c.onclick = function () {
+      F.slots = parseInt(c.dataset.n, 10);
+      Array.prototype.forEach.call(el('fDur').children, function (x) { x.classList.toggle('sel', x === c); });
+    };
+  });
+  if (!mv) {
+    var t = null;
+    el('fName').oninput = function () {
+      F.client = null; el('fPicked').classList.add('hide'); el('fPhone').classList.remove('hide');
+      var q = el('fName').value.trim();
+      clearTimeout(t);
+      if (q.length < 2) { el('fSug').classList.add('hide'); return; }
+      t = setTimeout(function () {
+        api('admin.clientsFind', { q: q }).then(function (d) {
+          if (!d.clients.length) { el('fSug').classList.add('hide'); return; }
+          el('fSug').innerHTML = d.clients.map(function (c, i) {
+            return '<div data-i="' + i + '"><b>' + esc(c.name) + '</b> <span class="tiny">' + esc(c.phone) +
+              (c.visits ? ' · визитов: ' + c.visits : '') + '</span></div>';
+          }).join('');
+          el('fSug').classList.remove('hide');
+          Array.prototype.forEach.call(el('fSug').children, function (n) {
+            n.onclick = function () {
+              var c = d.clients[parseInt(n.dataset.i, 10)];
+              F.client = c;
+              el('fName').value = c.name; el('fSug').classList.add('hide');
+              el('fPhone').classList.add('hide');
+              el('fPicked').innerHTML = esc(c.name) + ' · ' + esc(c.phone);
+              el('fPicked').classList.remove('hide');
+            };
+          });
+        }).catch(function () { });
+      }, 250);
+    };
+    setTimeout(function () { el('fName').focus(); }, 50);
+  }
+  el('fSave').onclick = function () { submitForm(false); };
+}
+
+function submitForm(force) {
+  var F = A.form, off = tzOffset(el('fDate').value);
+  var start = el('fDate').value + 'T' + el('fTime').value.slice(0, 5) + ':00' + off;
+  var p, action;
+  if (F.move) {
+    action = 'admin.bookingMove';
+    p = { booking_id: F.move.id, start_at: start, slots_count: F.slots, force: force };
+  } else {
+    action = 'admin.bookingCreate';
+    var client = F.client ? { client_id: F.client.client_id } : { name: el('fName').value.trim(), phone: el('fPhone').value.trim() };
+    if (!F.client && (!client.name || !client.phone)) { formMsg('Укажите имя и телефон или выберите клиента из подсказки'); return; }
+    p = { start_at: start, slots_count: F.slots, client: client, comment: el('fComment').value.trim(), force: force };
+  }
+  el('fSave').disabled = true;
+  api(action, p, F.rid).then(function (d) {
+    closeSheet();
+    say((F.move ? 'Перенесено: ' : 'Записано: ') + hm(d.start_at) + '–' + hm(d.end_at), 'ok');
+    A.date = new Date(d.start_at.slice(0, 10) + 'T12:00:00'); load(); /* календарная дата мастера, не телефона */
+  }).catch(function (r) {
+    if (el('fSave')) el('fSave').disabled = false;
+    if (r.error && r.error.code === 'CONFLICT') {
+      var list = (r.warnings || []).map(function (w) { return '• ' + w.text; }).join('\n');
+      if (confirm('Проверьте:\n' + list + '\n\nВсё равно ' + (F.move ? 'перенести' : 'записать') + '?')) submitForm(true);
+      return;
+    }
+    if (r.error && (r.error.code === 'UNAUTHORIZED' || r.error.code === 'TOKEN_EXPIRED')) { closeSheet(); fail(r); return; }
+    formMsg((r.error && r.error.message) || 'Ошибка');
+  });
+}
+function formMsg(t) { var m = el('fMsg'); if (m) { m.textContent = t; m.classList.remove('hide'); } }
+
+window.addEventListener('load', function () {
+  try { A.token = localStorage.getItem(TK); } catch (e) { }
+  el('doLogin').onclick = login;
+  el('pin').onkeydown = function (e) { if (e.key === 'Enter') login(); };
+  el('tabDay').onclick = function () { A.mode = 'day'; el('tabDay').className = 'tab sel'; el('tabWeek').className = 'tab'; load(); };
+  el('tabWeek').onclick = function () { A.mode = 'week'; el('tabWeek').className = 'tab sel'; el('tabDay').className = 'tab'; load(); };
+  el('prev').onclick = function () { A.date = new Date(A.date.getTime() - (A.mode === 'day' ? 1 : 7) * 86400000); load(); };
+  el('next').onclick = function () { A.date = new Date(A.date.getTime() + (A.mode === 'day' ? 1 : 7) * 86400000); load(); };
+  el('today').onclick = function () { A.date = new Date(); load(); };
+  el('bLunch').onclick = function () { quickBlock('lunch'); };
+  el('bRest').onclick = function () { quickBlock('rest'); };
+  el('bAll').onclick = function () { quickBlock('allday'); };
+  el('bCustom').onclick = function () {
+    var d = iso(A.date);
+    sendBlock(d + 'T' + el('cFrom').value.slice(0, 5) + ':00', d + 'T' + el('cTo').value.slice(0, 5) + ':00', el('cReason').value, false);
+  };
+  el('openSched').onclick = openSchedule;
+  el('saveSched').onclick = saveSchedule;
+  el('closeSched').onclick = closeSchedule;
+  el('logout').onclick = logout;
+  el('newBk').onclick = function () { openForm({}); };
+  el('sheet').onclick = function (e) { if (e.target === el('sheet')) closeSheet(); };
+
+  if (A.token) {
+    el('login').classList.add('hide'); el('app').classList.remove('hide');
+    A.date = new Date(); load();
+  }
+});
+</script>

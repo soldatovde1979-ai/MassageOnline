@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head><base target="_top"><meta charset="utf-8"><?!= include('styles') ?></head>
+<body>
+<div class="wrap">
+  <h1>Ваша запись</h1>
+  <div id="body"><div class="spin">Загружаю…</div></div>
+  <div class="msg err hide" id="msg"></div>
+  <div id="resch" class="hide">
+    <h2>Новое время</h2>
+    <div class="dates" id="dates"></div>
+    <div class="slots" id="slots"></div>
+  </div>
+</div>
+<script>
+var TOKEN = '<?= token ?>';
+var B = null, DAYS = [], DATE = null, FROM = new Date();
+
+function api(action, payload) {
+  return new Promise(function (res, rej) {
+    google.script.run
+      .withSuccessHandler(function (j) { var r = JSON.parse(j); r.ok ? res(r.data) : rej(r.error); })
+      .withFailureHandler(function (e) { rej({ message: e.message }); })
+      .apiCall(JSON.stringify({ action: action, auth: { token: TOKEN }, payload: payload || {} }));
+  });
+}
+function el(id) { return document.getElementById(id); }
+function hm(s) { return String(s).slice(11, 16); }
+function say(t, k) { var m = el('msg'); m.textContent = t; m.className = 'msg ' + (k || 'err'); m.classList.remove('hide'); }
+function iso(d) { return d.toISOString().slice(0, 10); }
+
+function render() {
+  var M = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  var d = new Date(B.start_at);
+  var cancelled = B.status !== 'confirmed';
+  el('body').innerHTML =
+    '<div class="card"><div style="font-size:17px;font-weight:600">' +
+    d.getDate() + ' ' + M[d.getMonth()] + ', ' + hm(B.start_at) + ' – ' + hm(B.end_at) + '</div>' +
+    '<div class="muted" style="margin-top:4px">' + B.service_title + '</div>' +
+    (cancelled ? '<div class="msg warn" style="margin:10px 0 0">Запись отменена</div>' : '') + '</div>' +
+    (cancelled ? '' :
+      '<button class="btn ghost" id="btnResch" style="margin-top:12px">Перенести</button>' +
+      '<button class="btn danger" id="btnCancel" style="margin-top:8px">Отменить запись</button>' +
+      '<p class="tiny" style="margin-top:12px">Отмена возможна не позднее чем за ' + B.cancel_deadline_hours + ' ч до начала.</p>');
+
+  if (cancelled) return;
+  el('btnCancel').onclick = function () {
+    if (!confirm('Отменить запись?')) return;
+    api('booking.cancel').then(function () { B.status = 'cancelled_by_client'; render(); })
+      .catch(function (e) { say(e.message); });
+  };
+  el('btnResch').onclick = function () { el('resch').classList.remove('hide'); loadDays(); };
+}
+
+function loadDays() {
+  el('slots').innerHTML = '<div class="spin">Загружаю…</div>';
+  api('availability.get', {
+    date_from: iso(FROM),
+    date_to: iso(new Date(FROM.getTime() + 6 * 86400000)),
+    service_id: B.service_id,
+    duration_min: Math.round((new Date(B.end_at) - new Date(B.start_at)) / 60000)
+  })
+    .then(function (d) {
+      DAYS = d.days;
+      var W = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+      el('dates').innerHTML = '<div class="day" id="pw" style="flex:0 0 40px">&#8249;</div>' +
+        DAYS.map(function (x) {
+          var dt = new Date(x.date + 'T12:00:00');
+          return '<div class="day' + (x.slots.length ? '' : ' off') + (x.date === DATE ? ' sel' : '') +
+            '" data-d="' + x.date + '"><div class="w">' + W[dt.getDay()] + '</div><div class="n">' + dt.getDate() + '</div></div>';
+        }).join('') + '<div class="day" id="nw" style="flex:0 0 40px">&#8250;</div>';
+      Array.prototype.forEach.call(el('dates').children, function (n) {
+        if (!n.dataset.d) return;
+        n.onclick = function () {
+          var day = DAYS.filter(function (x) { return x.date === n.dataset.d; })[0];
+          if (!day.slots.length) return;
+          DATE = day.date; loadDays();
+        };
+      });
+      el('pw').onclick = function () { var p = new Date(FROM.getTime() - 7 * 86400000); FROM = p < new Date() ? new Date() : p; loadDays(); };
+      el('nw').onclick = function () { FROM = new Date(FROM.getTime() + 7 * 86400000); loadDays(); };
+      if (!DATE || !DAYS.some(function (x) { return x.date === DATE && x.slots.length; })) {
+        var f = DAYS.filter(function (x) { return x.slots.length; })[0];
+        DATE = f ? f.date : null;
+      }
+      renderSlots();
+    }).catch(function (e) { say(e.message); });
+}
+
+function renderSlots() {
+  var day = DAYS.filter(function (x) { return x.date === DATE; })[0];
+  if (!day || !day.slots.length) { el('slots').innerHTML = '<div class="spin">Свободного времени нет</div>'; return; }
+  el('slots').innerHTML = day.slots.map(function (s) {
+    return '<div class="slot" data-s="' + s.start + '">' + hm(s.start) + ' &ndash; ' + hm(s.end) + '</div>';
+  }).join('');
+  Array.prototype.forEach.call(el('slots').children, function (n) {
+    n.onclick = function () {
+      if (!confirm('Перенести запись на ' + n.textContent + '?')) return;
+      api('booking.reschedule', { start_at: n.dataset.s }).then(function (d) {
+        B.start_at = d.start_at; B.end_at = d.end_at;
+        el('resch').classList.add('hide'); el('msg').classList.add('hide');
+        render(); say('Запись перенесена', 'ok');
+      }).catch(function (e) { say(e.message); if (e.code === 'SLOT_TAKEN') loadDays(); });
+    };
+  });
+}
+
+window.addEventListener('load', function () {
+  api('booking.get').then(function (d) { B = d; render(); })
+    .catch(function (e) { el('body').innerHTML = '<div class="msg err">' + e.message + '</div>'; });
+});
+</script>
+</body>
+</html>

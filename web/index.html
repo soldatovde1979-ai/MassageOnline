@@ -1,0 +1,62 @@
+<!doctype html>
+<!-- index.html — VERSION 1.0 (29.09.2026). Точка входа клиентской витрины (GitHub Pages и Telegram Mini App).
+     Связанные файлы: config.js v1.0, app_v1.css, app_v1.js, demo_v1.js, sw.js v1.0, manifest.webmanifest.
+     Мажор приложения — в meta mb-app-major: app_v1.js сверяет его с собой и с config.js при запуске. -->
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="mb-app-major" content="1">
+  <title>Запись на массаж</title>
+  <meta name="description" content="Онлайн-запись на массаж: свободное время, запись за минуту, мои записи.">
+  <meta name="theme-color" content="#EEF2EF" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101B18" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Массаж">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;600;700&family=Unbounded:wght@400;600&display=swap">
+  <link rel="stylesheet" href="app_v1.css">
+
+  <style>
+    /* Только то, что нужно до загрузки приложения: заставка и запрет двойного тапа-зума. */
+    html { touch-action: manipulation; background: #EEF2EF; }
+    @media (prefers-color-scheme: dark) { html { background: #101B18; } }
+    .splash { min-height: 100vh; min-height: 100dvh; display: grid; place-items: center; align-content: center; gap: 18px; padding: 24px; text-align: center; }
+    .splash img { width: 72px; height: 72px; border-radius: 18px; animation: splash-breathe 1.6s ease-in-out infinite; }
+    .splash p { margin: 0; color: #5B7169; font: 400 15px/1.4 'Golos Text', system-ui, sans-serif; }
+    @keyframes splash-breathe { 50% { transform: scale(.94); opacity: .8; } }
+    @media (prefers-reduced-motion: reduce) { .splash img { animation: none; } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="splash" role="status" aria-live="polite">
+      <img src="icons/icon.svg" alt="">
+      <p>Загружаем расписание…</p>
+    </div>
+    <noscript><div class="fatal"><h1>Нужен JavaScript</h1><p>Включите JavaScript в браузере, чтобы записаться.</p></div></noscript>
+  </div>
+
+  <!-- Telegram: внутри Mini App даёт initData, тему и кнопку «Назад». Грузится только внутри Telegram
+       (он передаёт параметры запуска в #tgWebApp…) — обычный браузер к telegram.org не ходит. -->
+  <script>
+    if (/tgWebApp/.test(location.hash) || window.TelegramWebviewProxy) {
+      document.write('<script src="https://telegram.org/js/telegram-web-app.js"><\/script>');
+    }
+  </script>
+  <script src="config.js"></script>
+  <script src="demo_v1.js"></script>
+  <script src="app_v1.js"></script>
+</body>
+</html>
