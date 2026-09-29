@@ -1,4 +1,4 @@
-/** Сквозной тест админки: настоящий admin.html + admin_js.html в jsdom, сервер — эмулятор GAS. */
+/** Сквозной тест админки: настоящий admin.html + admin_js.html в jsdom, сервер — эмулятор GAS. VERSION 1.1 (+ карточка клиента, этап 15.4) */
 const fs = require('fs'); const path = require('path');
 const { JSDOM } = require('jsdom');
 const { createGas } = require('./gas-emulator');
@@ -65,6 +65,37 @@ const setVal = (id, v) => { $(id).value = v; $(id).dispatchEvent(new w.Event('in
   line.click(); await tick();
   ok('тап по 12:30 — форма с 12:30', $('fTime') && $('fTime').value === '12:30' && $('fDate').value === day);
   $('fClose').click();
+
+  // этап 15.4: карточка клиента из листа записи, заметка, повторная запись из карточки
+  const ev2 = [...w.document.querySelectorAll('.ev.booking')].find((n) => /Светлана/.test(n.textContent));
+  ev2.click(); await tick();
+  ok('в листе записи есть «Карточка»', !!$('aCard'));
+  $('aCard').click(); await tick(80);
+  ok('карточка: имя, счётчик визитов, история', /Светлана/.test($('sheetBody').textContent) && /визитов: 0/.test($('sheetBody').textContent) &&
+    w.document.querySelectorAll('.hist > div').length === 2, $('sheetBody').textContent);
+  $('cNotes').value = 'Шея, давление сильнее'; $('cSave').click(); await tick(120);
+  const sv = c.Clients_findByPhone('+79161112233');
+  ok('заметка сохранена в таблицу', sv.notes === 'Шея, давление сильнее', JSON.stringify(sv));
+  ok('после сохранения — подтверждение', !$('cMsg').classList.contains('hide'));
+  $('cClose').click(); await tick(60);
+  const ev3 = [...w.document.querySelectorAll('.ev.booking')].find((n) => /Светлана/.test(n.textContent));
+  ev3.click(); await tick();
+  ok('заметка видна в листе записи', $('aNote') && /Шея/.test($('aNote').textContent));
+  $('aCard').click(); await tick(80);
+  $('cBook').click(); await tick();
+  ok('«Записать» из карточки: клиент уже выбран', $('fPhone').classList.contains('hide') && /Светлана/.test($('fPicked').textContent));
+  $('fDate').value = day; $('fTime').value = '18:00'; $('fSave').click(); await tick(150);
+  ok('запись из карточки создана без дубля клиента', c.Bookings_all(true).some((b) => b.start_at === c.iso(c.toDate(day, '18:00')) && b.client_id === sv.client_id) &&
+    c.Clients_all().filter((x) => x.phone === '+79161112233').length === 1);
+
+  // кнопка «Клиенты»: поиск → карточка
+  $('openClients').click(); await tick();
+  setVal('clQ', 'ник'); await tick(400);
+  const row = $('clList').querySelector('[data-id]');
+  ok('поиск клиентов находит Нику', row && /Ника/.test(row.textContent), $('clList').innerHTML);
+  row.click(); await tick(80);
+  ok('из поиска открывается карточка', /Ника/.test($('sheetBody').textContent) && !!$('cNotes'));
+  $('cClose').click();
 
   // локальная дата без сдвига UTC
   const isoFn = w.eval('iso');

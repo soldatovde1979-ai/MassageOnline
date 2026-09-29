@@ -1,5 +1,5 @@
 <script>
-/* admin_js — VERSION = "1.1" (этап 15.1: запись мастером, перенос, отметки, лист действий; дата без сдвига UTC) */
+/* admin_js — VERSION = "1.2" (15.1: запись мастером, перенос, отметки, лист действий; 15.4: карточка клиента — история и заметки) */
 var TK = 'mb_admin_token_v1';
 var A = { token: null, mode: 'day', date: null, data: null };
 
@@ -233,6 +233,7 @@ function openBookingSheet(it) {
     '<div class="tiny">' + hm(it.start_at) + '–' + hm(it.end_at) + ' · ' + durLabel(it.slots || 2) +
     (it.source === 'admin' ? ' · записала сама' : '') + '</div>' +
     (it.comment ? '<div class="note">' + esc(it.comment) + '</div>' : '') +
+    (it.client_note ? '<div class="note" id="aNote">&#128221; ' + esc(it.client_note) + '</div>' : '') +
     (digits ? '<div class="acts">' +
       '<a class="btn ghost sm" href="tel:+' + digits + '">Позвонить</a>' +
       '<a class="btn ghost sm" target="_blank" href="https://t.me/+' + digits + '">Telegram</a>' +
@@ -243,9 +244,11 @@ function openBookingSheet(it) {
     (started && it.status !== 'no_show' ? '<button class="btn ghost sm" id="aNo">Не пришла</button>' : '') +
     (started && it.status !== 'confirmed' ? '<button class="btn ghost sm" id="aUndo">Снять отметку</button>' : '') +
     (it.status === 'confirmed' ? '<button class="btn danger sm" id="aCancel">Отменить</button>' : '') +
+    (it.client_id ? '<button class="btn ghost sm" id="aCard">Карточка</button>' : '') +
     '</div><button class="btn ghost" id="aClose">Закрыть</button>';
   sheet(h);
   el('aClose').onclick = closeSheet;
+  if (el('aCard')) el('aCard').onclick = function () { openClientCard(it.client_id); };
   if (el('aMove')) el('aMove').onclick = function () { openForm({ move: it }); };
   if (el('aDone')) el('aDone').onclick = function () { mark(it.id, 'completed'); };
   if (el('aNo')) el('aNo').onclick = function () { mark(it.id, 'no_show'); };
@@ -265,7 +268,7 @@ function mark(id, status) {
 /* opts: {date, time} — новая запись; {move: item} — перенос */
 function openForm(opts) {
   var mv = opts.move;
-  var F = A.form = { rid: uid(), move: mv || null, client: null, slots: mv ? (mv.slots || 2) : 2 };
+  var F = A.form = { rid: uid(), move: mv || null, client: opts.client || null, slots: mv ? (mv.slots || 2) : 2 };
   var date = mv ? mv.start_at.slice(0, 10) : (opts.date || iso(A.date));
   var time = mv ? hm(mv.start_at) : (opts.time || '12:00');
   var chips = '';
@@ -320,7 +323,13 @@ function openForm(opts) {
         }).catch(function () { });
       }, 250);
     };
-    setTimeout(function () { el('fName').focus(); }, 50);
+    if (F.client) {
+      el('fName').value = F.client.name; el('fPhone').classList.add('hide');
+      el('fPicked').innerHTML = esc(F.client.name) + ' · ' + esc(F.client.phone);
+      el('fPicked').classList.remove('hide');
+    } else {
+      setTimeout(function () { if (el('fName')) el('fName').focus(); }, 50);
+    }
   }
   el('fSave').onclick = function () { submitForm(false); };
 }
@@ -356,6 +365,81 @@ function submitForm(force) {
 }
 function formMsg(t) { var m = el('fMsg'); if (m) { m.textContent = t; m.classList.remove('hide'); } }
 
+/* ===== Клиенты и карточка клиента (этап 15.4) ===== */
+var ST_LABEL = { confirmed: 'записана', completed: 'пришла', no_show: 'не пришла', cancelled_by_client: 'отменила сама',
+  cancelled_by_master: 'отменила мастер', cancelled_external: 'удалено из календаря' };
+function dmy(s) { s = String(s || ''); return s ? s.slice(8, 10) + '.' + s.slice(5, 7) + '.' + s.slice(0, 4) : ''; }
+
+function openClients() {
+  sheet('<h2 style="margin:0 0 10px">Клиенты</h2>' +
+    '<input type="text" id="clQ" placeholder="Имя или телефон" autocomplete="off">' +
+    '<div class="clist" id="clList"><div class="tiny" style="cursor:default">Начните вводить — от 2 символов</div></div>' +
+    '<button class="btn ghost" id="clClose" style="margin-top:10px">Закрыть</button>');
+  el('clClose').onclick = closeSheet;
+  var t = null;
+  el('clQ').oninput = function () {
+    var q = el('clQ').value.trim();
+    clearTimeout(t);
+    if (q.length < 2) return;
+    t = setTimeout(function () {
+      api('admin.clientsFind', { q: q }).then(function (d) {
+        if (!el('clList')) return;
+        el('clList').innerHTML = d.clients.length ? d.clients.map(function (c) {
+          return '<div data-id="' + esc(c.client_id) + '"><b>' + esc(c.name) + '</b> <span class="tiny">' + esc(c.phone) +
+            (c.visits ? ' · визитов: ' + c.visits : '') + '</span></div>';
+        }).join('') : '<div class="tiny" style="cursor:default">Никого не нашла</div>';
+        Array.prototype.forEach.call(el('clList').querySelectorAll('[data-id]'), function (n) {
+          n.onclick = function () { openClientCard(n.dataset.id); };
+        });
+      }).catch(fail);
+    }, 250);
+  };
+  setTimeout(function () { if (el('clQ')) el('clQ').focus(); }, 50);
+}
+
+function openClientCard(clientId) {
+  sheet('<div class="spin">Загружаю…</div>');
+  api('admin.clientGet', { client_id: clientId }).then(function (d) {
+    var c = d.client, s = d.stats, digits = String(c.phone || '').replace(/\D/g, '');
+    var hist = d.history.length ? d.history.map(function (b) {
+      return '<div><span>' + dmy(b.start_at) + ' ' + hm(b.start_at) + '–' + hm(b.end_at) +
+        (b.comment ? ' <span class="tiny">' + esc(b.comment) + '</span>' : '') + '</span>' +
+        '<span class="st">' + esc(ST_LABEL[b.status] || b.status) + '</span></div>';
+    }).join('') : '<div class="tiny">Записей ещё не было</div>';
+    sheet('<h2 style="margin:0 0 4px">' + esc(c.name) + '</h2>' +
+      '<div class="tiny">' + esc(c.phone) + (c.first_seen_at ? ' · с нами с ' + dmy(c.first_seen_at) : '') + '</div>' +
+      '<div class="stats">' +
+      '<span>визитов: ' + s.completed + '</span>' +
+      (s.no_show ? '<span>не пришла: ' + s.no_show + '</span>' : '') +
+      (s.cancelled ? '<span>отмен: ' + s.cancelled + '</span>' : '') +
+      (d.next_visit_at ? '<span>ближайшая: ' + dmy(d.next_visit_at) + ' ' + hm(d.next_visit_at) + '</span>' : '') +
+      (d.last_visit_at ? '<span>была: ' + dmy(d.last_visit_at) + '</span>' : '') + '</div>' +
+      (digits ? '<div class="acts">' +
+        '<a class="btn ghost sm" href="tel:+' + digits + '">Позвонить</a>' +
+        '<a class="btn ghost sm" target="_blank" href="https://t.me/+' + digits + '">Telegram</a>' +
+        '<a class="btn ghost sm" target="_blank" href="https://wa.me/' + digits + '">WhatsApp</a></div>' : '') +
+      '<label class="lbl">Заметки (видишь только ты)</label>' +
+      '<textarea id="cNotes" maxlength="2000" placeholder="Например: давление сильнее, шея, противопоказания">' + esc(c.notes) + '</textarea>' +
+      '<div class="row" style="gap:8px;margin-top:8px"><button class="btn sm" id="cSave">Сохранить заметку</button>' +
+      '<button class="btn ghost sm" id="cBook">Записать</button></div>' +
+      '<div class="msg ok hide" id="cMsg" style="margin-top:8px"></div>' +
+      '<h3 style="margin:16px 0 0">История' + (d.history_total > d.history.length ? ' (последние ' + d.history.length + ' из ' + d.history_total + ')' : '') + '</h3>' +
+      '<div class="hist">' + hist + '</div>' +
+      '<button class="btn ghost" id="cClose" style="margin-top:12px">Закрыть</button>');
+    el('cClose').onclick = closeSheet;
+    el('cBook').onclick = function () { openForm({ client: { client_id: c.client_id, name: c.name, phone: c.phone } }); };
+    el('cSave').onclick = function () {
+      el('cSave').disabled = true;
+      api('admin.clientUpdate', { client_id: c.client_id, notes: el('cNotes').value }).then(function () {
+        if (!el('cMsg')) return;
+        el('cSave').disabled = false;
+        el('cMsg').textContent = 'Заметка сохранена'; el('cMsg').classList.remove('hide');
+        if (A.data) load();
+      }).catch(function (r) { if (el('cSave')) el('cSave').disabled = false; fail(r); });
+    };
+  }).catch(function (r) { closeSheet(); fail(r); });
+}
+
 window.addEventListener('load', function () {
   try { A.token = localStorage.getItem(TK); } catch (e) { }
   el('doLogin').onclick = login;
@@ -377,6 +461,7 @@ window.addEventListener('load', function () {
   el('closeSched').onclick = closeSchedule;
   el('logout').onclick = logout;
   el('newBk').onclick = function () { openForm({}); };
+  el('openClients').onclick = openClients;
   el('sheet').onclick = function (e) { if (e.target === el('sheet')) closeSheet(); };
 
   if (A.token) {

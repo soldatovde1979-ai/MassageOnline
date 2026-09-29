@@ -6,7 +6,7 @@ var SCHEMA = {
   blocks: ['block_id', 'start_at', 'end_at', 'reason', 'push_to_calendar', 'gcal_event_id', 'created_at'],
   busy_events: ['gcal_event_id', 'start_at', 'end_at', 'is_all_day', 'title_masked', 'updated_at'],
   clients: ['client_id', 'phone', 'name', 'identity_provider', 'identity_ref', 'tg_chat_id', 'consent_at',
-    'first_seen_at', 'last_seen_at', 'bookings_count', 'is_blocked'],
+    'first_seen_at', 'last_seen_at', 'bookings_count', 'is_blocked', 'notes'],
   bookings: ['booking_id', 'request_id', 'client_id', 'service_id', 'start_at', 'end_at', 'status', 'comment',
     'source', 'calendar_sync_status', 'calendar_sync_attempts', 'next_retry_at', 'calendar_last_error',
     'gcal_event_id', 'manage_token_ver', 'created_at', 'updated_at', 'cancelled_at', 'cancel_reason'],
@@ -49,6 +49,9 @@ function setup() {
       sh.getRange(1, 1, 1, SCHEMA[name].length).setValues([SCHEMA[name]]);
       sh.setFrozenRows(1);
       sh.getRange(1, 1, 1, SCHEMA[name].length).setFontWeight('bold');
+    } else {
+      var added = Setup_addMissingColumns_(sh, SCHEMA[name]);
+      if (added.length) log.push(name + ': добавлены колонки ' + added.join(', '));
     }
   });
 
@@ -86,6 +89,23 @@ function setup() {
     '\nДалее: setupSecrets("ваш PIN"), затем installTriggers().';
   console.log(msg);
   return msg;
+}
+
+/**
+ * Этап 15.4: новые колонки дописываются в конец шапки существующего листа.
+ * Данные не двигаются; повторный вызов ничего не меняет.
+ */
+function Setup_addMissingColumns_(sh, cols) {
+  var width = sh.getLastColumn();
+  var head = width ? sh.getRange(1, 1, 1, width).getValues()[0].map(String) : [];
+  var added = [];
+  cols.forEach(function (col) {
+    if (head.indexOf(col) >= 0) return;
+    head.push(col);
+    sh.getRange(1, head.length).setValue(col);
+    added.push(col);
+  });
+  return added;
 }
 
 /** Генерирует и записывает все секреты. openssl и ручные хеши не нужны. */
@@ -142,7 +162,7 @@ function gdprForget(phone) {
     }
     Bookings_update(b.booking_id, { comment: '' });
   });
-  Sheet_update('clients', 'client_id', c.client_id, { name: 'Удалено', phone: stub, identity_ref: '', tg_chat_id: '' });
+  Sheet_update('clients', 'client_id', c.client_id, { name: 'Удалено', phone: stub, identity_ref: '', tg_chat_id: '', notes: '' });
   return 'Клиент обезличен. Будущие записи отменены, события календаря очищены.';
 }
 

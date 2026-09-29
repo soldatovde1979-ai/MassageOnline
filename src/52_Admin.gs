@@ -24,7 +24,8 @@ function Api_adminAgenda(req) {
       name: c ? c.name : '', phone: c ? c.phone : '', client_id: b.client_id,
       service_title: s ? s.title : b.service_id, source: b.source || 'web',
       slots: Math.round((parseIsoStrict(b.end_at) - parseIsoStrict(b.start_at)) / (GRID_MIN * 60000)),
-      status: b.status, calendar_sync_status: b.calendar_sync_status, comment: b.comment || ''
+      status: b.status, calendar_sync_status: b.calendar_sync_status, comment: b.comment || '',
+      client_note: c ? String(c.notes || '').slice(0, 140) : ''   // этап 15.4: заметка мастера — видна в листе записи
     });
   });
   Blocks_forRange(from, to).forEach(function (bl) {

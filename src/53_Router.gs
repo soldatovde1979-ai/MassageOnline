@@ -1,5 +1,5 @@
 /**
- * 53_Router.gs — VERSION 1.2 (29.09.2026)
+ * 53_Router.gs — VERSION 1.3 (29.09.2026)
  * Точки входа. doGet отдаёт страницы, apiCall и doPost делят один диспетчер.
  *
  * 1.1 (этап 15.1): маршруты мастера admin.bookingCreate / bookingMove / bookingMark / clientsFind.
@@ -7,6 +7,7 @@
  *     (этап 14) подключены ЛЕНИВО — 54_Restore.gs и 71_TelegramClient.gs грузятся ПОСЛЕ роутера,
  *     прямая ссылка на их функции в ROUTES роняла бы проект при загрузке (ревью, п. 1.3).
  *     Если файлов этапа 14 нет, маршруты отвечают UNKNOWN_ACTION, а не падают.
+ * 1.3 (этап 15.4): карточка клиента — admin.clientGet / admin.clientUpdate.
  */
 
 var ROUTES = {
@@ -29,7 +30,9 @@ var ROUTES = {
   'admin.bookingCreate': Api_adminBookingCreate,
   'admin.bookingMove': Api_adminBookingMove,
   'admin.bookingMark': Api_adminBookingMark,
-  'admin.clientsFind': Api_adminClientsFind
+  'admin.clientsFind': Api_adminClientsFind,
+  'admin.clientGet': Api_adminClientGet,
+  'admin.clientUpdate': Api_adminClientUpdate
 };
 
 /**

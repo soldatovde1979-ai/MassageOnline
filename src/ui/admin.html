@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head><base target="_top"><meta charset="utf-8"><?!= include('styles') ?>
-<!-- admin.html — VERSION = "1.1" (этап 15.1) -->
+<!-- admin.html — VERSION = "1.2" (этап 15.4: кнопка «Клиенты», стили карточки клиента) -->
 <style>
   .sheet{position:fixed;inset:0;background:rgba(20,16,12,.38);display:flex;align-items:flex-end;justify-content:center;z-index:50}
   .sheet .panel{background:var(--card);width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:18px 16px calc(16px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto;box-shadow:0 -8px 30px rgba(0,0,0,.12);animation:up .18s ease-out}
@@ -23,6 +23,13 @@
   .ev.st-completed{opacity:.55}
   .ev.st-no_show{opacity:.55;text-decoration:line-through}
   .fab{font-weight:600}
+  .stats{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+  .stats span{padding:4px 10px;border-radius:999px;background:var(--accent-bg);font-size:13px}
+  .hist{margin-top:8px;border-top:1px solid var(--line)}
+  .hist>div{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+  .hist .st{color:var(--mut,#8a857b);white-space:nowrap}
+  .clist>div{padding:10px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+  textarea#cNotes{width:100%;min-height:96px;box-sizing:border-box;font:inherit;padding:10px;border:1px solid var(--line);border-radius:10px;resize:vertical}
 </style>
 </head>
 <body>
@@ -54,6 +61,7 @@
       <button class="btn ghost sm" id="next">&#8250;</button>
       <div class="grow"></div>
       <button class="btn sm fab" id="newBk">+ Запись</button>
+      <button class="btn ghost sm" id="openClients">Клиенты</button>
       <button class="btn ghost sm" id="openSched">График</button>
       <button class="btn ghost sm" id="logout">Выйти</button>
     </div>
