@@ -1,4 +1,4 @@
-/** Сквозной тест админки: настоящий admin.html + admin_js.html в jsdom, сервер — эмулятор GAS. VERSION 1.1 (+ карточка клиента, этап 15.4) */
+/** Сквозной тест админки: настоящий admin.html + admin_js.html в jsdom, сервер — эмулятор GAS. VERSION 1.2 (+ карточка клиента 15.4; график с двумя окнами, отпуск, правила 15.5) */
 const fs = require('fs'); const path = require('path');
 const { JSDOM } = require('jsdom');
 const { createGas } = require('./gas-emulator');
@@ -96,6 +96,44 @@ const setVal = (id, v) => { $(id).value = v; $(id).dispatchEvent(new w.Event('in
   row.click(); await tick(80);
   ok('из поиска открывается карточка', /Ника/.test($('sheetBody').textContent) && !!$('cNotes'));
   $('cClose').click();
+
+  // этап 15.5: второе окно в дне через «График»
+  $('openSched').click(); await tick(80);
+  const q = (cls, wd) => w.document.querySelector('.' + cls + '[data-wd="' + wd + '"]');
+  ok('график: второе окно скрыто', q('sw-s2', 3).closest('tr').style.display === 'none');
+  q('sw-e', 3).value = '13:00';
+  q('sw-add', 3).click();
+  ok('«+ окно» показывает вторую строку', q('sw-s2', 3).closest('tr').style.display === '' && q('sw-s2', 3).value === '13:00');
+  q('sw-s2', 3).value = '16:00'; q('sw-e2', 3).value = '20:00';
+  $('saveSched').click(); await tick(120);
+  const wed = c.Schedule_all().filter((r) => r.weekday === 3 && r.is_working).map((r) => r.start_time + '-' + r.end_time).sort();
+  ok('в среду сохранено два окна', JSON.stringify(wed) === '["10:00-13:00","16:00-20:00"]', JSON.stringify(wed));
+  $('openSched').click(); await tick(80);
+  ok('при повторном открытии второе окно на месте', q('sw-s2', 3).value === '16:00' && q('sw-s2', 3).closest('tr').style.display === '');
+  q('sw-del', 3).click(); $('saveSched').click(); await tick(120);
+  ok('«×» убирает второе окно', c.Schedule_all().filter((r) => r.weekday === 3 && r.is_working).length === 1);
+
+  // отпуск: закрыть вт–чт следующей недели после day
+  const vFrom = c.dateOf(c.addDays(c.toDate(day, '12:00'), 8)), vTo = c.dateOf(c.addDays(c.toDate(day, '12:00'), 10));
+  $('vFrom').value = vFrom; $('vTo').value = vTo; $('vReason').value = 'Море';
+  $('bVac').click(); await tick(120);
+  const vb = c.Blocks_all().find((b) => b.reason === 'Море');
+  ok('отпуск — одна блокировка на три дня', vb && vb.start_at === c.iso(c.toDate(vFrom, '00:00')) && vb.end_at === c.iso(c.toDate(c.dateOf(c.addDays(c.toDate(vTo, '12:00'), 1)), '00:00')), JSON.stringify(vb));
+  $('tabDay').click(); await tick(20);
+  w.eval('A').date = new w.Date(c.dateOf(c.addDays(c.toDate(day, '12:00'), 9)) + 'T12:00:00'); w.eval('load')(); await tick(120);
+  ok('средний день отпуска показывает блокировку', /Море/.test($('board').textContent));
+  w.eval('A').date = new w.Date(c.dateOf(c.addDays(c.toDate(day, '12:00'), 11)) + 'T12:00:00'); w.eval('load')(); await tick(120);
+  ok('день после отпуска чистый', !/Море/.test($('board').textContent));
+
+  // правила записи
+  $('openRules').click(); await tick(80);
+  const inp = (k) => $('sheetBody').querySelector('[data-k="' + k + '"]');
+  ok('экран правил: 5 полей, значения из config', w.document.querySelectorAll('.rule').length === 5 && inp('cancel_deadline_hours').value === '4');
+  inp('buffer_after_min').value = '30'; inp('horizon_days').value = '500';
+  $('rSave').click(); await tick(100);
+  ok('неверное значение — ошибка на экране, ничего не записано', !$('rMsg').classList.contains('hide') && c.CFG('buffer_after_min') === '0', $('rMsg').textContent);
+  inp('horizon_days').value = '21'; $('rSave').click(); await tick(100);
+  ok('правила сохранены', $('sheet').classList.contains('hide') && c.CFG('buffer_after_min') === '30' && c.CFG('horizon_days') === '21');
 
   // локальная дата без сдвига UTC
   const isoFn = w.eval('iso');

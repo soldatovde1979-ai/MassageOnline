@@ -1,5 +1,5 @@
 <script>
-/* admin_js — VERSION = "1.2" (15.1: запись мастером, перенос, отметки, лист действий; 15.4: карточка клиента — история и заметки) */
+/* admin_js — VERSION = "1.3" (15.1: запись мастером, перенос, отметки; 15.4: карточка клиента; 15.5: два окна в дне, отпуск, правила записи, многодневные блокировки в дне и неделе) */
 var TK = 'mb_admin_token_v1';
 var A = { token: null, mode: 'day', date: null, data: null };
 
@@ -21,6 +21,10 @@ function uid() { try { return crypto.randomUUID(); } catch (e) { return 'r' + Da
 function esc(t) { return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function durLabel(n) { var h = Math.floor(n / 2), m = n % 2 ? '30' : ''; return n === 1 ? '30 мин' : h + (m ? ',5' : '') + ' ч'; }
 function hm(s) { return String(s).slice(11, 16); }
+/* Сдвиг календарной даты 'YYYY-MM-DD' на n дней — без часового пояса телефона. */
+function addDs(ds, n) { var d = new Date(Date.UTC(+ds.slice(0, 4), +ds.slice(5, 7) - 1, +ds.slice(8, 10) + n)); return d.toISOString().slice(0, 10); }
+/* Событие задевает день ds (время мастера из строки ISO): начинается до конца дня и кончается после его начала. */
+function onDay(it, ds) { return it.start_at.slice(0, 16) < addDs(ds, 1) + 'T00:00' && it.end_at.slice(0, 16) > ds + 'T00:00'; }
 function say(t, k) { var m = el('msg'); m.textContent = t; m.className = 'msg ' + (k || 'err'); m.classList.remove('hide'); if (k === 'ok') setTimeout(function () { m.classList.add('hide'); }, 3500); }
 function fail(r) {
   var c = r.error && r.error.code;
@@ -79,7 +83,7 @@ function renderDay() {
     });
     lines += '<div class="gline' + (work ? '' : ' off') + '" data-t="' + ('0' + h).slice(-2) + ':' + m + '"></div>';
   }
-  var evs = A.data.items.filter(function (it) { return it.start_at.slice(0, 10) === ds || it.end_at.slice(0, 10) === ds; });
+  var evs = A.data.items.filter(function (it) { return onDay(it, ds); });
   var html = evs.map(function (it) {
     /* Позиция — по времени мастера из строки ISO, а не по часовому поясу телефона. */
     var sH = it.start_at.slice(0, 10) < ds ? 0 : hNum(it.start_at);
@@ -108,7 +112,7 @@ function renderWeek() {
   var out = '';
   for (var i = 0; i < 7; i++) {
     var d = new Date(A.from.getTime() + i * 86400000), ds = iso(d);
-    var evs = A.data.items.filter(function (it) { return it.start_at.slice(0, 10) === ds; });
+    var evs = A.data.items.filter(function (it) { return onDay(it, ds); });
     out += '<div class="wd"><h3>' + W[i] + ' ' + d.getDate() + '</h3>' +
       (evs.length ? evs.map(function (it) {
         var st = it.status && it.status !== 'confirmed' ? ' st-' + it.status : '';
@@ -135,7 +139,10 @@ function bindEvents() {
       var k = n.dataset.k, id = n.dataset.id;
       if (k === 'external') { say('Это событие из Google Календаря — правьте его там', 'warn'); return; }
       if (k === 'block') {
-        if (confirm('Удалить блокировку?')) api('admin.blockDelete', { block_id: id }).then(function () { say('Удалено', 'ok'); load(); }).catch(fail);
+        var bl = A.data.items.filter(function (x) { return x.id === id; })[0];
+        var span = bl && bl.start_at.slice(0, 10) !== addDs(bl.end_at.slice(0, 10), bl.end_at.slice(11, 16) === '00:00' ? -1 : 0)
+          ? ' (' + dmy(bl.start_at) + ' – ' + dmy(addDs(bl.end_at.slice(0, 10), bl.end_at.slice(11, 16) === '00:00' ? -1 : 0)) + ', целиком)' : '';
+        if (confirm('Удалить блокировку' + span + '?')) api('admin.blockDelete', { block_id: id }).then(function () { say('Удалено', 'ok'); load(); }).catch(fail);
         return;
       }
       var it = A.data.items.filter(function (x) { return x.id === id; })[0];
@@ -157,8 +164,7 @@ function quickBlock(kind) {
 }
 
 function sendBlock(s, e, reason, force) {
-  var off = tzOffset(s.slice(0, 10));
-  api('admin.blockCreate', { start_at: s + off, end_at: e + off, reason: reason, push_to_calendar: el('push').checked, force: force })
+  api('admin.blockCreate', { start_at: s + tzOffset(s.slice(0, 10)), end_at: e + tzOffset(e.slice(0, 10)), reason: reason, push_to_calendar: el('push').checked, force: force })
     .then(function () { say('Время заблокировано', 'ok'); load(); })
     .catch(function (r) {
       if (r.error && r.error.code === 'CONFLICT') {
@@ -192,14 +198,40 @@ function openSchedule() {
     var W = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
     var rows = '';
     for (var wd = 1; wd <= 7; wd++) {
-      var r = d.schedule.filter(function (x) { return x.weekday === wd; })[0] ||
-        { is_working: false, start_time: '10:00', end_time: '20:00' };
+      var all = d.schedule.filter(function (x) { return x.weekday === wd; });
+      var on = all.filter(function (x) { return x.is_working; })
+        .sort(function (a, b) { return a.start_time < b.start_time ? -1 : 1; });
+      var r1 = on[0] || all[0] || { start_time: '10:00', end_time: '20:00' };
+      var r2 = on[1];
       rows += '<tr><td>' + W[wd - 1] + '</td>' +
-        '<td><input type="checkbox" data-wd="' + wd + '" class="sw-on"' + (r.is_working ? ' checked' : '') + '></td>' +
-        '<td><input type="time" step="1800" class="sw-s" data-wd="' + wd + '" value="' + r.start_time + '"></td>' +
-        '<td><input type="time" step="1800" class="sw-e" data-wd="' + wd + '" value="' + r.end_time + '"></td></tr>';
+        '<td><input type="checkbox" data-wd="' + wd + '" class="sw-on"' + (on.length ? ' checked' : '') + '></td>' +
+        '<td><input type="time" step="1800" class="sw-s" data-wd="' + wd + '" value="' + r1.start_time + '"></td>' +
+        '<td><input type="time" step="1800" class="sw-e" data-wd="' + wd + '" value="' + r1.end_time + '"></td>' +
+        '<td><button class="btn ghost sm sw-add" data-wd="' + wd + '" title="Второе окно"' + (r2 ? ' style="display:none"' : '') + '>+</button></td></tr>' +
+        '<tr class="w2" data-wd="' + wd + '"' + (r2 ? '' : ' style="display:none"') + '><td></td><td class="tiny">и</td>' +
+        '<td><input type="time" step="1800" class="sw-s2" data-wd="' + wd + '" value="' + (r2 ? r2.start_time : '') + '"></td>' +
+        '<td><input type="time" step="1800" class="sw-e2" data-wd="' + wd + '" value="' + (r2 ? r2.end_time : '') + '"></td>' +
+        '<td><button class="btn ghost sm sw-del" data-wd="' + wd + '">&#215;</button></td></tr>';
     }
     el('schedBody').innerHTML = rows;
+    Array.prototype.forEach.call(document.querySelectorAll('.sw-add'), function (b) {
+      b.onclick = function () {
+        var wd = b.dataset.wd, e1 = document.querySelector('.sw-e[data-wd="' + wd + '"]').value;
+        document.querySelector('tr.w2[data-wd="' + wd + '"]').style.display = '';
+        var s2 = document.querySelector('.sw-s2[data-wd="' + wd + '"]'), e2 = document.querySelector('.sw-e2[data-wd="' + wd + '"]');
+        if (!s2.value) { s2.value = e1; e2.value = e1 < '21:00' ? '21:00' : e1; }
+        b.style.display = 'none';
+      };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.sw-del'), function (b) {
+      b.onclick = function () {
+        var wd = b.dataset.wd;
+        document.querySelector('tr.w2[data-wd="' + wd + '"]').style.display = 'none';
+        document.querySelector('.sw-s2[data-wd="' + wd + '"]').value = '';
+        document.querySelector('.sw-e2[data-wd="' + wd + '"]').value = '';
+        document.querySelector('.sw-add[data-wd="' + wd + '"]').style.display = '';
+      };
+    });
     el('schedBox').classList.remove('hide');
     el('board').classList.add('hide');
   }).catch(fail);
@@ -207,14 +239,12 @@ function openSchedule() {
 
 function saveSchedule() {
   var rows = [];
+  var q = function (cls, wd) { return document.querySelector('.' + cls + '[data-wd="' + wd + '"]'); };
   for (var wd = 1; wd <= 7; wd++) {
-    rows.push({
-      weekday: wd,
-      is_working: document.querySelector('.sw-on[data-wd="' + wd + '"]').checked,
-      start_time: document.querySelector('.sw-s[data-wd="' + wd + '"]').value.slice(0, 5),
-      end_time: document.querySelector('.sw-e[data-wd="' + wd + '"]').value.slice(0, 5),
-      note: ''
-    });
+    var on = q('sw-on', wd).checked;
+    rows.push({ weekday: wd, is_working: on, start_time: q('sw-s', wd).value.slice(0, 5), end_time: q('sw-e', wd).value.slice(0, 5), note: '' });
+    var s2 = q('sw-s2', wd).value.slice(0, 5), e2 = q('sw-e2', wd).value.slice(0, 5);
+    if (on && s2 && e2) rows.push({ weekday: wd, is_working: true, start_time: s2, end_time: e2, note: '' });
   }
   api('admin.scheduleSet', { rows: rows })
     .then(function () { say('График сохранён', 'ok'); closeSchedule(); load(); })
@@ -365,6 +395,46 @@ function submitForm(force) {
 }
 function formMsg(t) { var m = el('fMsg'); if (m) { m.textContent = t; m.classList.remove('hide'); } }
 
+/* ===== Отпуск и правила записи (этап 15.5) ===== */
+function vacation() {
+  var f = el('vFrom').value, t = el('vTo').value || f;
+  if (!f) { say('Укажите первый день'); return; }
+  if (t < f) { say('Последний день раньше первого'); return; }
+  sendBlock(f + 'T00:00:00', addDs(t, 1) + 'T00:00:00', el('vReason').value.trim() || 'Отпуск', false);
+}
+
+function openRules() {
+  sheet('<div class="spin">Загружаю…</div>');
+  api('admin.rulesGet').then(function (d) { renderRules(d.rules); }).catch(function (r) { closeSheet(); fail(r); });
+}
+
+function renderRules(rules) {
+  sheet('<h2 style="margin:0 0 6px">Правила записи</h2>' +
+    '<div class="tiny">Действуют для клиентов. Ты сама можешь записать кого угодно и когда угодно.</div>' +
+    rules.map(function (r) {
+      var input = r.allowed
+        ? '<select data-k="' + r.key + '">' + r.allowed.map(function (v) { return '<option value="' + v + '"' + (v === r.value ? ' selected' : '') + '>' + v + '</option>'; }).join('') + '</select>'
+        : '<input type="number" inputmode="numeric" data-k="' + r.key + '" min="' + r.min + '" max="' + r.max + '" step="1" value="' + r.value + '">';
+      return '<div class="rule"><span>' + esc(r.title) + '</span><span class="v">' + input + '<span class="tiny">' + esc(r.unit) + '</span></span></div>';
+    }).join('') +
+    '<div class="msg err hide" id="rMsg" style="margin-top:10px"></div>' +
+    '<button class="btn" id="rSave" style="margin-top:12px">Сохранить</button>' +
+    '<button class="btn ghost" id="rClose" style="margin-top:8px">Закрыть</button>');
+  el('rClose').onclick = closeSheet;
+  el('rSave').onclick = function () {
+    var values = {};
+    Array.prototype.forEach.call(el('sheetBody').querySelectorAll('[data-k]'), function (n) { values[n.dataset.k] = Number(n.value); });
+    el('rSave').disabled = true;
+    api('admin.rulesSet', { values: values }).then(function () {
+      closeSheet(); say('Правила сохранены', 'ok');
+    }).catch(function (r) {
+      if (el('rSave')) el('rSave').disabled = false;
+      if (r.error && (r.error.code === 'UNAUTHORIZED' || r.error.code === 'TOKEN_EXPIRED')) { closeSheet(); fail(r); return; }
+      var m = el('rMsg'); if (m) { m.textContent = (r.error && r.error.message) || 'Ошибка'; m.classList.remove('hide'); }
+    });
+  };
+}
+
 /* ===== Клиенты и карточка клиента (этап 15.4) ===== */
 var ST_LABEL = { confirmed: 'записана', completed: 'пришла', no_show: 'не пришла', cancelled_by_client: 'отменила сама',
   cancelled_by_master: 'отменила мастер', cancelled_external: 'удалено из календаря' };
@@ -462,6 +532,8 @@ window.addEventListener('load', function () {
   el('logout').onclick = logout;
   el('newBk').onclick = function () { openForm({}); };
   el('openClients').onclick = openClients;
+  el('openRules').onclick = openRules;
+  el('bVac').onclick = vacation;
   el('sheet').onclick = function (e) { if (e.target === el('sheet')) closeSheet(); };
 
   if (A.token) {

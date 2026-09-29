@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head><base target="_top"><meta charset="utf-8"><?!= include('styles') ?>
-<!-- admin.html — VERSION = "1.2" (этап 15.4: кнопка «Клиенты», стили карточки клиента) -->
+<!-- admin.html — VERSION = "1.3" (15.4: «Клиенты», карточка клиента; 15.5: два окна в дне, отпуск, «Правила») -->
 <style>
   .sheet{position:fixed;inset:0;background:rgba(20,16,12,.38);display:flex;align-items:flex-end;justify-content:center;z-index:50}
   .sheet .panel{background:var(--card);width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:18px 16px calc(16px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto;box-shadow:0 -8px 30px rgba(0,0,0,.12);animation:up .18s ease-out}
@@ -29,6 +29,14 @@
   .hist>div{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
   .hist .st{color:var(--mut,#8a857b);white-space:nowrap}
   .clist>div{padding:10px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+  .sched td{padding:4px 4px;vertical-align:middle}
+  .sched .w2 td{padding-top:0}
+  .sched input[type=time]{width:96px}
+  .rule{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+  .rule .v{display:flex;align-items:center;gap:6px}
+  .rule input,.rule select{width:76px;padding:8px;text-align:center}
+  .toolbar{flex-wrap:wrap}
+  .toolbar .btn{white-space:nowrap}
   textarea#cNotes{width:100%;min-height:96px;box-sizing:border-box;font:inherit;padding:10px;border:1px solid var(--line);border-radius:10px;resize:vertical}
 </style>
 </head>
@@ -55,7 +63,7 @@
       </div>
     </div>
 
-    <div class="row" style="margin-bottom:12px">
+    <div class="row toolbar" style="margin-bottom:12px">
       <button class="btn ghost sm" id="prev">&#8249;</button>
       <button class="btn ghost sm" id="today">Сегодня</button>
       <button class="btn ghost sm" id="next">&#8250;</button>
@@ -63,6 +71,7 @@
       <button class="btn sm fab" id="newBk">+ Запись</button>
       <button class="btn ghost sm" id="openClients">Клиенты</button>
       <button class="btn ghost sm" id="openSched">График</button>
+      <button class="btn ghost sm" id="openRules">Правила</button>
       <button class="btn ghost sm" id="logout">Выйти</button>
     </div>
 
@@ -76,7 +85,7 @@
         <button class="btn sm" id="saveSched">Сохранить</button>
         <button class="btn ghost sm" id="closeSched">Отмена</button>
       </div>
-      <p class="tiny" style="margin-top:10px">Время должно быть кратно 30 минутам. Второе окно в дне добавляется строкой прямо в листе schedule.</p>
+      <p class="tiny" style="margin-top:10px">Время кратно 30 минутам. «+» — второе рабочее окно в тот же день, например после перерыва; «×» — убрать его.</p>
     </div>
 
     <div class="card" style="margin-top:16px">
@@ -91,6 +100,13 @@
         <input type="time" step="1800" id="cTo" value="15:00" style="width:110px">
         <input type="text" id="cReason" placeholder="Причина (необязательно)" style="flex:1;min-width:160px">
         <button class="btn sm" id="bCustom">Заблокировать</button>
+      </div>
+      <h3 style="margin:16px 0 8px;font-size:15px">Отпуск / несколько дней</h3>
+      <div class="row" style="flex-wrap:wrap;gap:8px">
+        <input type="date" id="vFrom" style="width:150px">
+        <input type="date" id="vTo" style="width:150px">
+        <input type="text" id="vReason" placeholder="Отпуск" style="flex:1;min-width:120px">
+        <button class="btn sm" id="bVac">Закрыть дни</button>
       </div>
       <div class="check" style="margin-bottom:0">
         <input type="checkbox" id="push" checked>
