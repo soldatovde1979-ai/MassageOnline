@@ -1,0 +1,363 @@
+<script>
+var LS_KEY = 'mb_client_v1';
+var LS_DRAFT = 'mb_draft_v1';
+var GRID = 30;
+var S = { services: [], svc: null, from: null, days: [], date: null, sel: [], req: null,
+          client: null, busy: false, minSlots: 2, maxSlots: 8 };
+
+function api(action, payload, auth) {
+  return new Promise(function (res, rej) {
+    google.script.run
+      .withSuccessHandler(function (json) {
+        var r = JSON.parse(json);
+        r.ok ? res(r.data) : rej(r.error || { code: 'INTERNAL', message: 'Ошибка' });
+      })
+      .withFailureHandler(function (e) { rej({ code: 'INTERNAL', message: e.message, retryable: true }); })
+      .apiCall(JSON.stringify({ action: action, request_id: S.req, auth: auth || {}, payload: payload || {} }));
+  });
+}
+
+/* ---------- локальное хранилище ---------- */
+
+function loadClient() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY)) || null; }
+  catch (e) { try { localStorage.removeItem(LS_KEY); } catch (e2) { } return null; }
+}
+function saveClientFromEcho(echo) {
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify({
+      v: 1, client_id: echo.client_id, name: echo.name, phone: echo.phone, saved_at: new Date().toISOString()
+    }));
+    localStorage.removeItem(LS_DRAFT);
+  } catch (e) { }
+}
+function forgetClient() {
+  try { localStorage.removeItem(LS_KEY); localStorage.removeItem(LS_DRAFT); } catch (e) { }
+  S.client = null;
+  el('name').value = ''; el('phone').value = '';
+  renderClientBox(); renderHello(); showMsg('Данные на этом устройстве удалены', 'ok');
+}
+
+/* Черновик: пишется на каждый ввод, переживает обновление страницы. */
+function loadDraft() {
+  try { return JSON.parse(localStorage.getItem(LS_DRAFT)) || null; } catch (e) { return null; }
+}
+var draftTimer = null;
+function saveDraft() {
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(function () {
+    try {
+      localStorage.setItem(LS_DRAFT, JSON.stringify({
+        name: el('name').value, phone: el('phone').value, comment: el('comment').value
+      }));
+    } catch (e) { }
+    renderHello();
+  }, 400);
+}
+
+/* ---------- утилиты ---------- */
+
+function uuid() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    var r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+function el(id) { return document.getElementById(id); }
+function showMsg(text, kind) {
+  var m = el('msg');
+  m.textContent = text; m.className = 'msg ' + (kind || 'err'); m.classList.remove('hide');
+  if (kind === 'ok') setTimeout(function () { m.classList.add('hide'); }, 4000);
+}
+function hideMsg() { el('msg').classList.add('hide'); }
+function fmtPhone(p) {
+  var d = String(p || '').replace(/\D/g, '');
+  return d.length === 11 ? '+7 ' + d.slice(1, 4) + ' ' + d.slice(4, 7) + '-' + d.slice(7, 9) + '-' + d.slice(9) : p;
+}
+function hm(iso) { return iso.slice(11, 16); }
+function firstName(n) { return String(n || '').trim().split(/\s+/)[0] || ''; }
+function fmtDur(min) {
+  var h = Math.floor(min / 60), m = min % 60;
+  return (h ? h + ' ч' : '') + (h && m ? ' ' : '') + (m ? m + ' мин' : '');
+}
+/* Локальная дата без UTC-сдвига: toISOString() ночью съезжает на день назад. */
+function isoDate(d) {
+  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+}
+
+/* ---------- старт ---------- */
+
+function start() {
+  S.client = loadClient();
+  var dr = loadDraft();
+  if (dr) {
+    el('name').value = dr.name || '';
+    el('phone').value = dr.phone || '';
+    el('comment').value = dr.comment || '';
+  }
+  renderClientBox();
+  renderHello();
+  api('services.list').then(function (d) {
+    S.services = d.services;
+    S.horizon = d.horizon_days;
+    if (d.min_slots) S.minSlots = d.min_slots;
+    if (d.max_slots) S.maxSlots = d.max_slots;
+    renderServices();
+    if (S.services.length) selectService(S.services[0]);
+  }).catch(function (e) { showMsg(e.message); });
+}
+
+function renderHello() {
+  var n = firstName(S.client && S.client.name) || firstName(el('name').value);
+  if (n) {
+    el('hello').textContent = 'Здравствуйте, ' + n;
+    el('sub').textContent = 'Выберите удобное время';
+  } else {
+    el('hello').textContent = 'Запись на массаж';
+    el('sub').textContent = 'Выберите удобное время';
+  }
+}
+
+function renderServices() {
+  // Одна услуга — выбирать нечего, блок не показываем.
+  el('servicesBox').classList.toggle('hide', S.services.length < 2);
+  el('services').innerHTML = S.services.map(function (s) {
+    return '<div class="opt" data-id="' + s.service_id + '"><div class="t">' + s.title + '</div></div>';
+  }).join('');
+  Array.prototype.forEach.call(el('services').children, function (n) {
+    n.onclick = function () {
+      var s = S.services.filter(function (x) { return x.service_id === n.dataset.id; })[0];
+      selectService(s);
+    };
+  });
+}
+
+function selectService(s) {
+  S.svc = s; S.sel = [];
+  Array.prototype.forEach.call(el('services').children, function (n) {
+    n.className = 'opt' + (n.dataset.id === s.service_id ? ' sel' : '');
+  });
+  S.from = new Date();
+  loadDays();
+}
+
+/* ---------- даты ---------- */
+
+function loadDays() {
+  el('slots').innerHTML = '<div class="spin">Загружаю свободное время…</div>';
+  var from = new Date(S.from), to = new Date(S.from.getTime() + 6 * 86400000);
+  api('availability.get', {
+    date_from: isoDate(from), date_to: isoDate(to),
+    service_id: S.svc.service_id, duration_min: GRID
+  }).then(function (d) {
+      S.days = d.days;
+      ensureDate();
+      renderDays(); renderSlots();
+    })
+    .catch(function (e) { el('slots').innerHTML = ''; showMsg(e.message); });
+}
+
+/* Сохраняем выбранную дату, если она есть в новом наборе и в ней остались слоты.
+   Иначе — первый свободный день. Раньше выбор безусловно сбрасывался на первый день. */
+function ensureDate() {
+  var keep = S.days.filter(function (x) { return x.date === S.date && x.slots.length; })[0];
+  if (keep) return;
+  var d = S.days.filter(function (x) { return x.slots.length; })[0];
+  S.date = d ? d.date : null;
+  S.sel = [];
+}
+
+function renderDays() {
+  var W = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+  var box = el('dates');
+  var keepScroll = box.scrollLeft;          // перерисовка innerHTML сбрасывает прокрутку в 0
+  var nav = '<div class="day" id="prevw" style="flex:0 0 40px">&#8249;</div>';
+  var html = S.days.map(function (d) {
+    var dt = new Date(d.date + 'T12:00:00');
+    var off = d.slots.length === 0 ? ' off' : '';
+    var sel = d.date === S.date ? ' sel' : '';
+    return '<div class="day' + off + sel + '" data-d="' + d.date + '">' +
+      '<div class="w">' + W[dt.getDay()] + '</div><div class="n">' + dt.getDate() + '</div></div>';
+  }).join('');
+  var next = '<div class="day" id="nextw" style="flex:0 0 40px">&#8250;</div>';
+  box.innerHTML = nav + html + next;
+  box.scrollLeft = keepScroll;
+  Array.prototype.forEach.call(box.children, function (n) {
+    if (!n.dataset.d) return;
+    n.onclick = function () {
+      var day = S.days.filter(function (x) { return x.date === n.dataset.d; })[0];
+      if (!day.slots.length) return;
+      S.date = day.date; S.sel = [];
+      markDays(); renderSlots(); hideMsg();
+    };
+  });
+  el('prevw').onclick = function () {
+    var p = new Date(S.from.getTime() - 7 * 86400000);
+    S.from = p < new Date() ? new Date() : p; S.date = null; loadDays();
+  };
+  el('nextw').onclick = function () {
+    S.from = new Date(S.from.getTime() + 7 * 86400000); S.date = null; loadDays();
+  };
+}
+
+/* Переключение активного дня без перестройки DOM — прокрутка не дёргается. */
+function markDays() {
+  Array.prototype.forEach.call(el('dates').children, function (n) {
+    if (!n.dataset.d) return;
+    n.classList.toggle('sel', n.dataset.d === S.date);
+  });
+}
+
+/* ---------- слоты: мультивыбор ---------- */
+
+function curDay() { return S.days.filter(function (x) { return x.date === S.date; })[0]; }
+
+function renderSlots() {
+  var day = curDay();
+  if (!day || !day.slots.length) {
+    el('slots').innerHTML = '<div class="spin">На эти дни свободного времени нет. Посмотрите следующую неделю &#8250;</div>';
+    el('pick').classList.add('hide');
+    return;
+  }
+  el('slots').innerHTML = day.slots.map(function (s) {
+    return '<div class="slot' + (S.sel.indexOf(s.start) >= 0 ? ' sel' : '') +
+      '" data-s="' + s.start + '">' + hm(s.start) + '</div>';
+  }).join('');
+  Array.prototype.forEach.call(el('slots').children, function (n) {
+    n.onclick = function () { toggleSlot(n.dataset.s); };
+  });
+  renderPick();
+}
+
+function adjacent(a, b) {
+  return Math.abs(new Date(a).getTime() - new Date(b).getTime()) === GRID * 60000;
+}
+
+function toggleSlot(startIso) {
+  hideMsg();
+  var i = S.sel.indexOf(startIso);
+
+  if (i >= 0) {
+    // Снимать можно только крайние — иначе в наборе появится дырка.
+    if (i === 0) S.sel.shift();
+    else if (i === S.sel.length - 1) S.sel.pop();
+    else { S.sel = S.sel.slice(0, i); showMsg('Из середины слот убрать нельзя — набор обрезан'); }
+    renderSlots();
+    return;
+  }
+
+  if (!S.sel.length) { S.sel = [startIso]; renderSlots(); return; }
+
+  if (adjacent(startIso, S.sel[0])) { S.sel.unshift(startIso); }
+  else if (adjacent(startIso, S.sel[S.sel.length - 1])) { S.sel.push(startIso); }
+  else {
+    showMsg('Слоты должны идти подряд, без разрыва. Начните выбор заново с этого времени');
+    S.sel = [startIso];
+  }
+
+  if (S.sel.length > S.maxSlots) {
+    S.sel = S.sel.slice(0, S.maxSlots);
+    showMsg('Больше ' + fmtDur(S.maxSlots * GRID) + ' за один раз записать нельзя');
+  }
+  renderSlots();
+}
+
+function renderPick() {
+  var p = el('pick');
+  if (!S.sel.length) { p.classList.add('hide'); return; }
+  var n = S.sel.length;
+  var startIso = S.sel[0];
+  var endIso = new Date(new Date(S.sel[n - 1]).getTime() + GRID * 60000);
+  var endHm = ('0' + endIso.getHours()).slice(-2) + ':' + ('0' + endIso.getMinutes()).slice(-2);
+  p.classList.remove('hide');
+  p.innerHTML = '<b>' + hm(startIso) + ' – ' + endHm + '</b> · ' + fmtDur(n * GRID) +
+    (n < S.minSlots ? ' <span class="warnt">— нужно минимум ' + S.minSlots + ' слота подряд</span>' : '');
+}
+
+/* ---------- данные клиента ---------- */
+
+function renderClientBox() {
+  var known = S.client && S.client.phone;
+  el('known').classList.toggle('hide', !known);
+  el('fields').classList.toggle('hide', !!known);
+  if (known) el('knownText').textContent = S.client.name + ', ' + fmtPhone(S.client.phone);
+}
+
+function expandFields() {
+  el('known').classList.add('hide');
+  el('fields').classList.remove('hide');
+  if (S.client) { el('name').value = S.client.name || ''; el('phone').value = fmtPhone(S.client.phone || ''); }
+}
+
+/* ---------- отправка ---------- */
+
+function submit() {
+  if (S.busy) return;
+  hideMsg();
+  if (!S.sel.length) { showMsg('Выберите время'); return; }
+  if (S.sel.length < S.minSlots) { showMsg('Выберите минимум ' + S.minSlots + ' слота подряд'); return; }
+  for (var i = 1; i < S.sel.length; i++) {
+    if (!adjacent(S.sel[i - 1], S.sel[i])) { showMsg('В выбранном времени есть разрыв'); return; }
+  }
+
+  var known = !el('known').classList.contains('hide');
+  var name = known ? S.client.name : el('name').value.trim();
+  var phone = known ? S.client.phone : el('phone').value.trim();
+  if (name.length < 2) { showMsg('Укажите имя'); return; }
+  if (String(phone).replace(/\D/g, '').length < 10) { showMsg('Укажите телефон'); return; }
+
+  S.busy = true; el('go').disabled = true; el('go').textContent = 'Записываю…';
+  S.req = S.req || uuid();
+
+  api('booking.create', {
+    service_id: S.svc.service_id,
+    start_at: S.sel[0],
+    slots_count: S.sel.length,
+    client: { client_id: S.client ? S.client.client_id : '', name: name, phone: phone },
+    comment: el('comment').value.trim(),
+    source: 'web'
+  }).then(function (d) {
+    saveClientFromEcho(d.client_echo);
+    done(d);
+  }).catch(function (e) {
+    S.busy = false; el('go').disabled = false; el('go').textContent = 'Записаться';
+    if (e.code === 'SLOT_TAKEN') {
+      S.req = null; S.sel = [];
+      showMsg('Это время только что заняли. Выберите другое');
+      loadDays();
+    } else if (e.code === 'BUSY') {
+      showMsg('Сервис занят, повторите через несколько секунд');
+    } else {
+      S.req = null;
+      showMsg(e.message);
+    }
+  });
+}
+
+function done(d) {
+  el('step1').classList.add('hide');
+  el('okBox').classList.remove('hide');
+  var st = new Date(d.start_at), fin = new Date(d.end_at);
+  var W = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
+  var M = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  el('okWhen').textContent = W[st.getDay()] + ', ' + st.getDate() + ' ' + M[st.getMonth()] +
+    ', ' + hm(d.start_at) + ' – ' + hm(d.end_at);
+  el('okWhat').textContent = d.service_title + ' · ' + fmtDur(Math.round((fin - st) / 60000));
+  el('okManage').href = d.manage_url;
+  var g = 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' +
+    encodeURIComponent(d.service_title) + '&dates=' +
+    st.toISOString().replace(/[-:]|\.\d{3}/g, '') + '/' + fin.toISOString().replace(/[-:]|\.\d{3}/g, '');
+  el('okGcal').href = g;
+}
+
+window.addEventListener('load', function () {
+  el('go').onclick = submit;
+  el('change').onclick = expandFields;
+  el('forget').onclick = forgetClient;
+  el('again').onclick = function () { location.reload(); };
+  el('name').oninput = saveDraft;
+  el('phone').oninput = saveDraft;
+  el('comment').oninput = saveDraft;
+  start();
+});
+</script>

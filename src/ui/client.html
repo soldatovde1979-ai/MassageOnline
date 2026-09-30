@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head><base target="_top"><meta charset="utf-8"><?!= include('styles') ?></head>
+<body>
+<div class="wrap">
+
+  <div id="step1">
+    <h1 id="hello">Запись на массаж</h1>
+    <p class="sub" id="sub">Выберите удобное время</p>
+
+    <div id="servicesBox" class="hide">
+      <h2>Услуга</h2>
+      <div id="services"></div>
+    </div>
+
+    <h2>Дата</h2>
+    <div class="dates" id="dates"></div>
+
+    <h2>Время</h2>
+    <p class="tiny" style="margin:-4px 0 10px">
+      Один слот — 30 минут. Выберите несколько слотов подряд, минимум два.
+      Между выбранными слотами не должно быть разрыва.
+    </p>
+    <div class="slots" id="slots"></div>
+    <div class="pick hide" id="pick"></div>
+
+    <div id="form">
+      <h2>Ваши данные</h2>
+
+      <div class="card hide" id="known">
+        <div class="between">
+          <div class="grow" id="knownText"></div>
+          <button class="btn ghost sm" id="change">изменить</button>
+        </div>
+        <div class="tiny" style="margin-top:8px">
+          Данные хранятся только в этом браузере.
+          <a href="#" id="forget">Забыть меня</a>
+        </div>
+      </div>
+
+      <div id="fields">
+        <label for="name">Имя</label>
+        <input type="text" id="name" autocomplete="given-name" placeholder="Анна">
+        <label for="phone">Телефон</label>
+        <input type="tel" id="phone" autocomplete="tel" placeholder="+7 916 123-45-67">
+      </div>
+
+      <label for="comment">Комментарий (необязательно)</label>
+      <textarea id="comment" placeholder="Что беспокоит, пожелания"></textarea>
+
+      <div class="msg err hide" id="msg"></div>
+      <button class="btn" id="go">Записаться</button>
+    </div>
+  </div>
+
+  <div id="okBox" class="hide">
+    <h1>Вы записаны</h1>
+    <div class="card" style="margin:16px 0">
+      <div style="font-size:17px;font-weight:600" id="okWhen"></div>
+      <div class="muted" id="okWhat" style="margin-top:4px"></div>
+    </div>
+    <a class="btn ghost" id="okGcal" target="_blank" style="text-align:center;text-decoration:none;margin-bottom:8px">Добавить в свой календарь</a>
+    <a class="btn ghost" id="okManage" style="text-align:center;text-decoration:none;margin-bottom:8px">Отменить или перенести</a>
+    <button class="btn ghost" id="again">Записаться ещё раз</button>
+    <p class="tiny" style="margin-top:16px">Ссылку на отмену сохраните — по ней можно изменить запись без звонка.</p>
+  </div>
+
+</div>
+<?!= include('client_js') ?>
+</body>
+</html>
