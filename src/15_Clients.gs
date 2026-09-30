@@ -34,11 +34,14 @@ function Clients_upsert(identity) {
     if (String(found.is_blocked).toUpperCase() === 'TRUE') {
       throw apiError('UNAUTHORIZED', 'Запись недоступна. Свяжитесь с мастером');
     }
-    Sheet_update('clients', 'client_id', found.client_id, {
+    var patch = {
       name: identity.name || found.name,
       last_seen_at: nowIso(),
       bookings_count: (parseInt(found.bookings_count || 0, 10) + 1)
-    });
+    };
+    // Этап 15.3: записался из Telegram Mini App — запоминаем чат для напоминаний (id пользователя = id личного чата)
+    if (identity.provider === 'telegram' && identity.identity_ref) patch.tg_chat_id = identity.identity_ref;
+    Sheet_update('clients', 'client_id', found.client_id, patch);
     found.name = identity.name || found.name;
     return found;
   }
@@ -48,7 +51,7 @@ function Clients_upsert(identity) {
     name: identity.name,
     identity_provider: identity.provider || 'local',
     identity_ref: identity.identity_ref || '',
-    tg_chat_id: '',
+    tg_chat_id: identity.provider === 'telegram' ? (identity.identity_ref || '') : '',
     consent_at: nowIso(),
     first_seen_at: nowIso(),
     last_seen_at: nowIso(),

@@ -1,9 +1,17 @@
+/** 60_Triggers.gs — VERSION 1.1 (30.09.2026): + sendReminders, eveningDigest (этап 15.3); сводка — вечером вместо 03:00. */
+
 function installTriggers() {
   removeTriggers();
   ScriptApp.newTrigger('syncFromCalendar').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('flushOutbox').timeBased().everyMinutes(1).create();
   ScriptApp.newTrigger('dailyMaintenance').timeBased().atHour(3).everyDays(1).create();
-  return 'Триггеры установлены: syncFromCalendar 5 мин, flushOutbox 1 мин, dailyMaintenance 03:00';
+  // Этап 15.3: напоминания клиентам и вечерняя сводка мастеру
+  ScriptApp.newTrigger('sendReminders').timeBased().everyMinutes(15).create();
+  var h = parseInt(CFG_opt('digest_hour', '20'), 10);
+  if (!(h >= 0 && h <= 23)) h = 20;
+  ScriptApp.newTrigger('eveningDigest').timeBased().atHour(h).everyDays(1).create();
+  return 'Триггеры установлены: syncFromCalendar 5 мин, flushOutbox 1 мин, dailyMaintenance 03:00, ' +
+    'sendReminders 15 мин, eveningDigest ' + h + ':00';
 }
 
 function removeTriggers() {
@@ -18,13 +26,19 @@ function dailyMaintenance() {
     var done = Bookings_markCompleted();
     Audit_rotate(50000, 20000);
     var purged = BusyEvents_purgePast(7);
-    Notify_masterDailyDigest();
     Audit_log('dailyMaintenance', 'OK', Date.now() - t0, '',
       'архив: ' + moved + ', завершено: ' + done + ', очищено событий: ' + purged, 'trigger');
   } catch (e) {
     Audit_log('dailyMaintenance', 'ERROR', Date.now() - t0, e.code || 'INTERNAL', e.message, 'trigger');
+    Notify_dev('dailyMaintenance упал: ' + e.message);
     throw e;
   }
+}
+
+/** Триггер вечерней сводки (этап 15.3). Сводка переехала с утра на вечер: «завтра у тебя …». */
+function eveningDigest() {
+  try { Notify_eveningDigest(); }
+  catch (e) { Notify_dev('eveningDigest упал: ' + e.message); throw e; }
 }
 
 /** Страховка: бронь, застрявшая в переносе из-за обрыва выполнения, возвращается в confirmed. */

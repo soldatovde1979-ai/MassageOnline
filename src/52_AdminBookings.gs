@@ -1,5 +1,5 @@
 /**
- * 52_AdminBookings.gs — VERSION = "1.0" (этап 15.1)
+ * 52_AdminBookings.gs — VERSION = "1.1" (этап 15.1; 1.1 — перенос сбрасывает отметки напоминаний, этап 15.3)
  * Мастер записывает клиента сам, переносит запись, отмечает «пришёл / не пришёл», ищет клиента.
  *
  * Файл назван 52_*, а не 55_*: GAS грузит файлы по имени, и ROUTES в 53_Router.gs ссылается на
@@ -169,7 +169,8 @@ function Api_adminBookingMove(req) {
 
     Bookings_update(b.booking_id, {
       start_at: iso(iv.start), end_at: iso(iv.end),
-      calendar_sync_status: 'pending', calendar_sync_attempts: 0, next_retry_at: '', calendar_last_error: ''
+      calendar_sync_status: 'pending', calendar_sync_attempts: 0, next_retry_at: '', calendar_last_error: '',
+      reminder_24_at: '', reminder_2_at: ''   // этап 15.3: напоминания — заново, по новому времени
     });
     return { ok: true, data: Bookings_toPublic(Bookings_get(b.booking_id)) };
   } finally {

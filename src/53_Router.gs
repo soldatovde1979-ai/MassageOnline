@@ -1,5 +1,5 @@
 /**
- * 53_Router.gs — VERSION 1.4 (29.09.2026)
+ * 53_Router.gs — VERSION 1.5 (30.09.2026)
  * Точки входа. doGet отдаёт страницы, apiCall и doPost делят один диспетчер.
  *
  * 1.1 (этап 15.1): маршруты мастера admin.bookingCreate / bookingMove / bookingMark / clientsFind.
@@ -9,6 +9,7 @@
  *     Если файлов этапа 14 нет, маршруты отвечают UNKNOWN_ACTION, а не падают.
  * 1.3 (этап 15.4): карточка клиента — admin.clientGet / admin.clientUpdate.
  * 1.4 (этап 15.5): правила записи — admin.rulesGet / admin.rulesSet.
+ * 1.5 (этап 15.3): ошибка INTERNAL — сообщение разработчику (Notify_dev); ?r=admin&d=ГГГГ-ММ-ДД открывает админку на дне.
  */
 
 var ROUTES = {
@@ -61,6 +62,7 @@ function Api_dispatch(req) {
   } catch (err) {
     var code = err.code || 'INTERNAL';
     Audit_log(req.action, 'ERROR', Date.now() - t0, code, err.message, Router_actor_(req));
+    if (code === 'INTERNAL') Notify_dev('Ошибка ' + req.action + ': ' + err.message);
     return { ok: false, error: { code: code, message: err.message, retryable: Router_retryable_(code) } };
   }
 }
@@ -109,6 +111,8 @@ function doGet(e) {
   var file = r === 'admin' ? 'admin' : r === 'manage' ? 'manage' : 'client';
   var t = HtmlService.createTemplateFromFile('ui/' + file);
   t.token = (e && e.parameter && e.parameter.t) || '';
+  var d = (e && e.parameter && e.parameter.d) || '';
+  t.date = /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : '';
   return t.evaluate()
     .setTitle('Запись на массаж')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1')

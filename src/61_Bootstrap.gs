@@ -9,7 +9,8 @@ var SCHEMA = {
     'first_seen_at', 'last_seen_at', 'bookings_count', 'is_blocked', 'notes'],
   bookings: ['booking_id', 'request_id', 'client_id', 'service_id', 'start_at', 'end_at', 'status', 'comment',
     'source', 'calendar_sync_status', 'calendar_sync_attempts', 'next_retry_at', 'calendar_last_error',
-    'gcal_event_id', 'manage_token_ver', 'created_at', 'updated_at', 'cancelled_at', 'cancel_reason'],
+    'gcal_event_id', 'manage_token_ver', 'created_at', 'updated_at', 'cancelled_at', 'cancel_reason',
+    'reminder_24_at', 'reminder_2_at'],
   bookings_archive: null,
   audit: ['ts', 'action', 'status', 'duration_ms', 'error_code', 'message', 'actor', 'phone_masked'],
   config: ['key', 'value']
@@ -34,7 +35,9 @@ var CONFIG_DEFAULTS = [
   ['gcal_color_id', '11'],
   ['gcal_summary_prefix', '[МАССАЖ]'],
   ['retention_months', '12'],
-  ['master_phone', '']
+  ['master_phone', ''],
+  ['dev_tg_chat_id', ''],   // этап 15.3: ошибки — разработчику в Telegram (узнать id — telegramFindChats())
+  ['digest_hour', '20']     // этап 15.3: час вечерней сводки мастеру «на завтра»
 ];
 
 function setup() {

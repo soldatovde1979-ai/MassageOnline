@@ -1,4 +1,4 @@
-/** Сквозной тест админки: настоящий admin.html + admin_js.html в jsdom, сервер — эмулятор GAS. VERSION 1.2 (+ карточка клиента 15.4; график с двумя окнами, отпуск, правила 15.5) */
+/** Сквозной тест админки: настоящий admin.html + admin_js.html в jsdom, сервер — эмулятор GAS. VERSION 1.3 (+ карточка 15.4; график, отпуск, правила 15.5; открыть на дне по ссылке 15.3) */
 const fs = require('fs'); const path = require('path');
 const { JSDOM } = require('jsdom');
 const { createGas } = require('./gas-emulator');
@@ -19,6 +19,7 @@ const $ = (id) => w.document.getElementById(id);
 const setVal = (id, v) => { $(id).value = v; $(id).dispatchEvent(new w.Event('input')); };
 
 (async () => {
+  const isoFn0 = (x) => w.eval('iso')(x);
   w.dispatchEvent(new w.Event('load')); await tick();
   $('pin').value = '1234'; $('doLogin').click(); await tick(80);
   ok('вход по PIN показывает приложение', !$('app').classList.contains('hide'));
@@ -134,6 +135,14 @@ const setVal = (id, v) => { $(id).value = v; $(id).dispatchEvent(new w.Event('in
   ok('неверное значение — ошибка на экране, ничего не записано', !$('rMsg').classList.contains('hide') && c.CFG('buffer_after_min') === '0', $('rMsg').textContent);
   inp('horizon_days').value = '21'; $('rSave').click(); await tick(100);
   ok('правила сохранены', $('sheet').classList.contains('hide') && c.CFG('buffer_after_min') === '30' && c.CFG('horizon_days') === '21');
+
+  // этап 15.3: «Открыть день» из Telegram — ?d= приходит в START_DATE
+  const sd = w.eval('startDate');
+  ok('без даты в ссылке — сегодня (шаблон не подставлен)', isoFn0(sd()) === isoFn0(new w.Date()));
+  w.eval("START_DATE = '2026-10-02'");
+  ok('с датой в ссылке — открывается этот день', isoFn0(sd()) === '2026-10-02');
+  w.eval("START_DATE = '2026-10-02<script>'");
+  ok('мусор вместо даты — сегодня', isoFn0(sd()) === isoFn0(new w.Date()));
 
   // локальная дата без сдвига UTC
   const isoFn = w.eval('iso');

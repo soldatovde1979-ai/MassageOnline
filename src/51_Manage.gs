@@ -44,12 +44,16 @@ function Api_bookingReschedule(req) {
       manage_token_ver: parseInt(b.manage_token_ver || 1, 10) + 1,
       calendar_sync_status: 'pending',
       calendar_sync_attempts: 0,
-      next_retry_at: ''
+      next_retry_at: '',
+      reminder_24_at: '',   // этап 15.3: напоминания — заново, по новому времени
+      reminder_2_at: ''
     });
   } finally {
     lock.releaseLock();
   }
-  return { ok: true, data: Bookings_toPublic(Bookings_get(b.booking_id)) };
+  var moved = Bookings_get(b.booking_id);
+  Notify_send('booking_rescheduled_by_client', { booking: moved, from_start: b.start_at, from_end: b.end_at });
+  return { ok: true, data: Bookings_toPublic(moved) };
 }
 
 function Manage_assertDeadline_(b) {

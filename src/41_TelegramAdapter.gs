@@ -1,11 +1,14 @@
 /**
- * 41_TelegramAdapter.gs — VERSION 1.1 (29.09.2026)
+ * 41_TelegramAdapter.gs — VERSION 1.2 (30.09.2026)
  *
  * Telegram Bot API: отправка сообщений и проверка подписи initData Mini App.
  * Было 1.0: заглушка. Сигнатуры сохранены — 40_Notify.gs и 21_Identity.gs не меняются.
  *
  * Токен: один бот на всё (решение Р-4 в my-FT) — свойство TELEGRAM_CLIENT_BOT_TOKEN,
  * запасной вариант — TELEGRAM_BOT_TOKEN (имя из ранних версий).
+ *
+ * 1.2 (этап 15.3): telegramFindChats() и telegramTest() — узнать chat_id мастера и разработчика
+ * и проверить отправку, запуская из редактора Apps Script.
  */
 
 var TG_INITDATA_MAX_AGE_SEC = 86400; // подпись Mini App живёт сутки
@@ -120,4 +123,40 @@ function Telegram_hex_(bytes) {
     out += (v < 16 ? '0' : '') + v.toString(16);
   }
   return out;
+}
+
+/**
+ * Запуск из редактора: список чатов, которые писали боту (нужно сначала написать боту /start).
+ * Работает, пока у бота нет вебхука (этап 14). chat_id вписать в config: master_tg_chat_id, dev_tg_chat_id.
+ */
+function telegramFindChats() {
+  var token = Telegram_token_();
+  if (!token) return 'Нет токена: задайте свойство скрипта TELEGRAM_CLIENT_BOT_TOKEN';
+  var resp = UrlFetchApp.fetch('https://api.telegram.org/bot' + token + '/getUpdates', { muteHttpExceptions: true });
+  var out = JSON.parse(resp.getContentText());
+  if (!out.ok) return 'Telegram ответил ошибкой: ' + out.description;
+  var seen = {}, lines = [];
+  (out.result || []).forEach(function (u) {
+    var m = u.message || u.edited_message;
+    if (!m || !m.chat || seen[m.chat.id]) return;
+    seen[m.chat.id] = true;
+    lines.push(m.chat.id + ' — ' + [m.chat.first_name, m.chat.last_name, m.chat.username ? '@' + m.chat.username : ''].filter(Boolean).join(' '));
+  });
+  var msg = lines.length ? 'Чаты, писавшие боту:\n' + lines.join('\n') : 'Никто не писал боту. Напишите ему /start и запустите ещё раз.';
+  console.log(msg);
+  return msg;
+}
+
+/** Запуск из редактора: пробное сообщение мастеру и разработчику. */
+function telegramTest() {
+  var res = [];
+  [['master_tg_chat_id', 'мастеру'], ['dev_tg_chat_id', 'разработчику']].forEach(function (k) {
+    var chat = CFG_opt(k[0], '');
+    if (!chat) { res.push(k[1] + ': ' + k[0] + ' не задан'); return; }
+    var out = Telegram_sendMessage(chat, 'Проверка связи MassageOnline ✅');
+    res.push(k[1] + ': ' + (out && out.ok ? 'отправлено' : 'ошибка, см. журнал выполнения'));
+  });
+  var msg = res.join('\n');
+  console.log(msg);
+  return msg;
 }
