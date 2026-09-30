@@ -1,5 +1,5 @@
 /**
- * 53_Router.gs — VERSION 1.5 (30.09.2026)
+ * 53_Router.gs — VERSION 1.6 (30.09.2026)
  * Точки входа. doGet отдаёт страницы, apiCall и doPost делят один диспетчер.
  *
  * 1.1 (этап 15.1): маршруты мастера admin.bookingCreate / bookingMove / bookingMark / clientsFind.
@@ -9,6 +9,7 @@
  *     Если файлов этапа 14 нет, маршруты отвечают UNKNOWN_ACTION, а не падают.
  * 1.3 (этап 15.4): карточка клиента — admin.clientGet / admin.clientUpdate.
  * 1.4 (этап 15.5): правила записи — admin.rulesGet / admin.rulesSet.
+ * 1.6 (этап 15.6): «Мой месяц» — admin.stats.
  * 1.5 (этап 15.3): ошибка INTERNAL — сообщение разработчику (Notify_dev); ?r=admin&d=ГГГГ-ММ-ДД открывает админку на дне.
  */
 
@@ -36,7 +37,8 @@ var ROUTES = {
   'admin.clientGet': Api_adminClientGet,
   'admin.clientUpdate': Api_adminClientUpdate,
   'admin.rulesGet': Api_adminRulesGet,
-  'admin.rulesSet': Api_adminRulesSet
+  'admin.rulesSet': Api_adminRulesSet,
+  'admin.stats': Api_adminStats
 };
 
 /**

@@ -1,11 +1,11 @@
 /**
- * run-all.js — VERSION 1.3 (30.09.2026): + stage15-3.test.js, stage15-4.test.js, stage15-5.test.js
+ * run-all.js — VERSION 1.4 (30.09.2026): + stage15-3, 15-4, 15-5, 15-6
  * Все тесты одной командой перед clasp push: node tests/run-all.js
  * Код выхода 1, если хоть один тест упал — push делать нельзя.
  */
 const { execFileSync } = require('child_process');
 const path = require('path');
-const files = ['admin-bookings.test.js', 'admin-ui.e2e.js', 'stage15-2.test.js', 'stage15-3.test.js', 'stage15-4.test.js', 'stage15-5.test.js', 'web-client.e2e.js'];
+const files = ['admin-bookings.test.js', 'admin-ui.e2e.js', 'stage15-2.test.js', 'stage15-3.test.js', 'stage15-4.test.js', 'stage15-5.test.js', 'stage15-6.test.js', 'web-client.e2e.js'];
 let failed = 0;
 files.forEach((f) => {
   const full = path.join(__dirname, f);

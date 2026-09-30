@@ -1,5 +1,5 @@
 <script>
-/* admin_js — VERSION = "1.4" (15.3: открыть на дне из ссылки Telegram; 15.1: запись мастером, перенос, отметки; 15.4: карточка клиента; 15.5: два окна в дне, отпуск, правила записи, многодневные блокировки в дне и неделе) */
+/* admin_js — VERSION = "1.5" (15.6: «Мой месяц»; 15.3: открыть на дне из ссылки Telegram; 15.1: запись мастером, перенос, отметки; 15.4: карточка клиента; 15.5: два окна в дне, отпуск, правила записи, многодневные блокировки в дне и неделе) */
 var TK = 'mb_admin_token_v1';
 var A = { token: null, mode: 'day', date: null, data: null };
 
@@ -440,6 +440,53 @@ function renderRules(rules) {
   };
 }
 
+/* ===== «Мой месяц» (этап 15.6) ===== */
+var MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+function ymShift(ym, n) { var d = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7) - 1 + n, 1)); return d.toISOString().slice(0, 7); }
+function plural(n, one, few, many) { var a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 12 || b > 14) ? few : many; }
+function hoursLabel(min) { var h = Math.floor(min / 60), m = min % 60; return h + (m ? ',5' : ''); }
+
+function openStats(ym) {
+  sheet('<div class="spin">Считаю…</div>');
+  api('admin.stats', ym ? { month: ym } : {}).then(renderStats).catch(function (r) { closeSheet(); fail(r); });
+}
+
+function renderStats(s) {
+  var W = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'], WF = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'];
+  var max = Math.max.apply(null, s.by_weekday.concat([1]));
+  var delta = s.visits - s.prev_visits;
+  var title = MONTHS[+s.month.slice(5, 7) - 1] + ' ' + s.month.slice(0, 4);
+  var bars = s.by_weekday.map(function (v, i) {
+    return '<div title="' + WF[i] + ': ' + v + ' ' + plural(v, 'визит', 'визита', 'визитов') + '">' +
+      (v ? '<em>' + v + '</em>' : '') + '<i style="height:' + Math.round(v / max * 80) + 'px"></i></div>';
+  }).join('');
+  var best = s.best_day ? dmy(s.best_day.date).slice(0, 5) + ' — ' + s.best_day.visits + ' ' + plural(s.best_day.visits, 'клиент', 'клиента', 'клиентов') +
+    ', ' + hoursLabel(s.best_day.minutes) + ' ч' : '';
+  sheet('<div class="mnav"><button class="btn ghost sm" id="sPrev">&#8249;</button>' +
+    '<h2 style="margin:0">' + title + '</h2>' +
+    '<button class="btn ghost sm" id="sNext"' + (s.is_current ? ' disabled' : '') + '>&#8250;</button></div>' +
+    '<div class="tiles">' +
+    '<div class="tile"><b>' + s.visits + '</b><span>' + plural(s.visits, 'визит', 'визита', 'визитов') + '</span></div>' +
+    '<div class="tile"><b>' + hoursLabel(s.minutes) + '</b><span>часов работы</span></div>' +
+    '<div class="tile"><b>' + s.clients + '</b><span>' + plural(s.clients, 'клиент', 'клиента', 'клиентов') +
+    (s.new_clients ? ', новых ' + s.new_clients : '') + '</span></div></div>' +
+    '<div class="tiny" style="margin-top:8px">' +
+    (s.prev_visits || s.visits ? (delta > 0 ? '▲ на ' + delta + ' больше' : delta < 0 ? '▼ на ' + (-delta) + ' меньше' : 'столько же') + ', чем в прошлом месяце' : 'В прошлом месяце визитов не было') +
+    (s.upcoming ? ' · впереди ещё ' + s.upcoming : '') +
+    (s.no_show ? ' · не пришли: ' + s.no_show : '') + (s.cancelled ? ' · отмен: ' + s.cancelled : '') + '</div>' +
+    (best ? '<div class="note">&#11088; Лучший день: ' + esc(best) + '</div>' : '') +
+    (s.top_clients.length ? '<h3 style="margin:14px 0 4px;font-size:15px">Постоянные</h3>' + s.top_clients.map(function (c) {
+      return '<div class="between" style="padding:6px 0;border-bottom:1px solid var(--line)"><span>' + esc(c.name) + '</span><span class="tiny">' +
+        c.visits + ' ' + plural(c.visits, 'визит', 'визита', 'визитов') + '</span></div>';
+    }).join('') : '') +
+    '<h3 style="margin:14px 0 0;font-size:15px">Визиты по дням недели</h3>' +
+    '<div class="bars">' + bars + '</div><div class="blabels">' + W.map(function (w) { return '<div>' + w + '</div>'; }).join('') + '</div>' +
+    '<button class="btn ghost" id="sClose" style="margin-top:14px">Закрыть</button>');
+  el('sClose').onclick = closeSheet;
+  el('sPrev').onclick = function () { openStats(ymShift(s.month, -1)); };
+  el('sNext').onclick = function () { if (!s.is_current) openStats(ymShift(s.month, 1)); };
+}
+
 /* ===== Клиенты и карточка клиента (этап 15.4) ===== */
 var ST_LABEL = { confirmed: 'записана', completed: 'пришла', no_show: 'не пришла', cancelled_by_client: 'отменила сама',
   cancelled_by_master: 'отменила мастер', cancelled_external: 'удалено из календаря' };
@@ -538,6 +585,7 @@ window.addEventListener('load', function () {
   el('newBk').onclick = function () { openForm({}); };
   el('openClients').onclick = openClients;
   el('openRules').onclick = openRules;
+  el('openStats').onclick = function () { openStats(); };
   el('bVac').onclick = vacation;
   el('sheet').onclick = function (e) { if (e.target === el('sheet')) closeSheet(); };
 

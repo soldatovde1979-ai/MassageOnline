@@ -1,5 +1,5 @@
 /**
- * gas-emulator.js — VERSION = "1.1"  (1.1: Utilities.newBlob для подписи Telegram)
+ * gas-emulator.js — VERSION = "1.2"  (1.1: Utilities.newBlob для подписи Telegram; 1.2: DriveApp, триггер по дню недели)
  * Локальный эмулятор Google Apps Script для прогона серверного кода massage_booking_app в Node.
  * Загружает src/*.gs В ТОМ ЖЕ ПОРЯДКЕ, что и GAS (сортировка по имени), каждый файл — отдельным
  * скриптом в общем глобальном контексте. Так же, как в GAS V8, ссылка верхнего уровня на функцию
@@ -58,6 +58,31 @@ function makeSheet(name) {
   return sheet;
 }
 
+/** Диск в памяти: папки, файлы, копии, корзина — ровно то, что нужно 33_Backup.gs. */
+function makeDrive(log) {
+  let seq = 0;
+  const file = (name, folderId) => {
+    const f = { id: 'f' + (++seq), name, folderId, trashed: false,
+      getId: () => f.id, getName: () => f.name, isTrashed: () => f.trashed, setTrashed: (v) => { f.trashed = !!v; return f; },
+      makeCopy: (n, folder) => { const c = file(n, folder.getId()); log.drive.files.push(c); return c; } };
+    return f;
+  };
+  const folder = (name) => {
+    const d = { id: 'd' + (++seq), name, trashed: false, getId: () => d.id, getName: () => d.name, isTrashed: () => d.trashed,
+      setTrashed: (v) => { d.trashed = !!v; return d; },
+      getFiles: () => { const list = log.drive.files.filter((x) => x.folderId === d.id && !x.trashed); let i = 0;
+        return { hasNext: () => i < list.length, next: () => list[i++] }; } };
+    return d;
+  };
+  const ss = file('TEST_SS', null); ss.id = 'TEST_SS';
+  log.drive.files.push(ss);
+  return {
+    createFolder: (n) => { const d = folder(n); log.drive.folders.push(d); return d; },
+    getFolderById: (id) => { const d = log.drive.folders.find((x) => x.id === id); if (!d) throw new Error('No item with the given ID'); return d; },
+    getFileById: (id) => { const f = log.drive.files.find((x) => x.id === id); if (!f) throw new Error('No item with the given ID'); return f; }
+  };
+}
+
 function makeSpreadsheet() {
   const sheets = [makeSheet('Sheet1')];
   return {
@@ -105,7 +130,7 @@ const toBuf = (v) => Buffer.from(Array.isArray(v) ? v.map((b) => (b + 256) % 256
 
 function createGas(opts) {
   opts = opts || {};
-  const log = { mail: [], calendar: [], fetch: [], console: [] };
+  const log = { mail: [], calendar: [], fetch: [], console: [], triggers: [], drive: { folders: [], files: [] } };
   const props = Object.assign({ SPREADSHEET_ID: 'TEST_SS' }, opts.props || {});
   const cache = new Map();
   const ss = makeSpreadsheet();
@@ -154,7 +179,15 @@ function createGas(opts) {
       }
     },
     UrlFetchApp: { fetch: (url, o) => { log.fetch.push([url, o]); return { getResponseCode: () => 200, getContentText: () => '{"ok":true,"result":{}}' }; } },
-    ScriptApp: { newTrigger: () => ({ timeBased: () => ({ everyMinutes: () => ({ create() { } }), atHour: () => ({ everyDays: () => ({ create() { } }) }) }) }), getProjectTriggers: () => [], deleteTrigger() { } },
+    ScriptApp: {
+      WeekDay: { SUNDAY: 'SUNDAY', MONDAY: 'MONDAY' },
+      newTrigger: (fn) => ({ timeBased: () => ({
+        everyMinutes: () => ({ create() { log.triggers.push(fn); } }),
+        atHour: () => ({ everyDays: () => ({ create() { log.triggers.push(fn); } }) }),
+        onWeekDay: () => ({ atHour: () => ({ create() { log.triggers.push(fn); } }) }) }) }),
+      getProjectTriggers: () => [], deleteTrigger() { }
+    },
+    DriveApp: makeDrive(log),
     HtmlService: { XFrameOptionsMode: { ALLOWALL: 'ALLOWALL' } },
     ContentService: { MimeType: { JSON: 'JSON' }, createTextOutput: (t) => ({ setMimeType() { return this; }, getContent: () => t }) },
     Session: { getScriptTimeZone: () => 'Europe/Moscow' }

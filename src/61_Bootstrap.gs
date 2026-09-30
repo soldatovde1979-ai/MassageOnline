@@ -37,7 +37,8 @@ var CONFIG_DEFAULTS = [
   ['retention_months', '12'],
   ['master_phone', ''],
   ['dev_tg_chat_id', ''],   // этап 15.3: ошибки — разработчику в Telegram (узнать id — telegramFindChats())
-  ['digest_hour', '20']     // этап 15.3: час вечерней сводки мастеру «на завтра»
+  ['digest_hour', '20'],    // этап 15.3: час вечерней сводки мастеру «на завтра»
+  ['backup_keep', '8']      // этап 15.6: сколько еженедельных копий таблицы хранить на Диске
 ];
 
 function setup() {
